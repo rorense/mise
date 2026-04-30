@@ -7,6 +7,7 @@ const KEY_YOUTUBE = 'mise_youtube_api_key';
 const KEY_APPEARANCE = 'mise_appearance';
 const KEY_ONBOARDED = 'mise_onboarded';
 const KEY_UNITS_DISPLAY = 'mise_units_display';
+const KEY_SEEN_STEP_DRAG_HINT = 'mise_seen_step_drag_hint';
 
 export async function getOpenAiApiKey(): Promise<string | null> {
   return SecureStore.getItemAsync(KEY_OPENAI);
@@ -56,4 +57,13 @@ export async function setUnitsDisplayPreference(
   preference: UnitsDisplayPreference
 ): Promise<void> {
   await SecureStore.setItemAsync(KEY_UNITS_DISPLAY, preference);
+}
+
+export async function getSeenStepDragHint(): Promise<boolean> {
+  const value = await SecureStore.getItemAsync(KEY_SEEN_STEP_DRAG_HINT);
+  return value === '1';
+}
+
+export async function setSeenStepDragHint(seen: boolean): Promise<void> {
+  await SecureStore.setItemAsync(KEY_SEEN_STEP_DRAG_HINT, seen ? '1' : '0');
 }

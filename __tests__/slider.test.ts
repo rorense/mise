@@ -7,6 +7,11 @@ describe('normalizeServings', () => {
     expect(normalizeServings(3.4)).toBe(3);
     expect(normalizeServings(3.6)).toBe(4);
   });
+
+  it('supports a dynamic max serving range', () => {
+    expect(normalizeServings(18, 20)).toBe(18);
+    expect(normalizeServings(24, 20)).toBe(20);
+  });
 });
 
 describe('shouldCommitSliderTick', () => {

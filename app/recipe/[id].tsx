@@ -53,12 +53,16 @@ export default function RecipeDetailScreen() {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<RecipeChatSheetRef>(null);
   const lastSliderCommitAtRef = useRef(0);
+  const lastRecipeIdRef = useRef<string | null>(null);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [servings, setServings] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
   const [showArchiveRecipeConfirm, setShowArchiveRecipeConfirm] = useState(false);
   const [unitsMode, setUnitsMode] = useState<UnitsDisplayMode>('compact');
+  const [showIngredients, setShowIngredients] = useState(true);
+  const [showMethod, setShowMethod] = useState(true);
+  const [showCookJournal, setShowCookJournal] = useState(true);
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -73,10 +77,17 @@ export default function RecipeDetailScreen() {
     ]);
     setUnitsMode(unitsPreference);
     if (r) {
-      const initialServings = normalizeServings(r.baseServings);
-      setServings(initialServings);
+      const maxServings = Math.max(12, Math.round(r.baseServings));
+      setServings((prev) => {
+        if (lastRecipeIdRef.current !== r.id || prev === null) {
+          return normalizeServings(r.baseServings, maxServings);
+        }
+        return normalizeServings(prev, maxServings);
+      });
+      lastRecipeIdRef.current = r.id;
       setRecipe(r);
     } else {
+      lastRecipeIdRef.current = null;
       setRecipe(null);
       setServings(null);
     }
@@ -100,6 +111,7 @@ export default function RecipeDetailScreen() {
     recipe.mainImageUri,
     recipe.cookLogs.find((l) => l.photoUri)?.photoUri
   );
+  const sliderMax = Math.max(12, Math.round(recipe.baseServings));
 
   const shareRecipe = async () => {
     const lines = [
@@ -235,6 +247,27 @@ export default function RecipeDetailScreen() {
     await reload();
   };
 
+  const openQuickActions = () => {
+    setDialog({
+      title: 'Recipe actions',
+      message: recipe.title,
+      actions: [
+        { label: 'Cancel' },
+        {
+          label: 'Edit recipe',
+          onPress: () =>
+            router.push({ pathname: '/recipe/form', params: { recipeId: recipe.id } }),
+        },
+        { label: 'Share', onPress: shareRecipe },
+        {
+          label: recipe.isArchived ? 'Unarchive' : 'Archive',
+          variant: recipe.isArchived ? 'default' : 'destructive',
+          onPress: () => setShowArchiveRecipeConfirm(true),
+        },
+      ],
+    });
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
@@ -287,9 +320,28 @@ export default function RecipeDetailScreen() {
           </Pressable>
         </View>
         <View style={{ padding: 20, gap: 12 }}>
-          <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 26, color: colors.textPrimary }}>
-            {recipe.title}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text
+              style={{ flex: 1, fontFamily: 'Lora_700Bold', fontSize: 26, color: colors.textPrimary }}
+            >
+              {recipe.title}
+            </Text>
+            <Pressable
+              onPress={openQuickActions}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.surface,
+              }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color={colors.textPrimary} />
+            </Pressable>
+          </View>
           {recipe.sourceUrl ? (
             <Text
               onPress={() => Linking.openURL(recipe.sourceUrl)}
@@ -383,7 +435,7 @@ export default function RecipeDetailScreen() {
             </View>
             <Slider
               minimumValue={1}
-              maximumValue={12}
+              maximumValue={sliderMax}
               step={1}
               value={servings}
               onValueChange={(value) => {
@@ -392,21 +444,32 @@ export default function RecipeDetailScreen() {
                   return;
                 }
                 lastSliderCommitAtRef.current = now;
-                setServings(normalizeServings(value));
+                setServings(normalizeServings(value, sliderMax));
               }}
               onSlidingComplete={(value) => {
                 lastSliderCommitAtRef.current = Date.now();
-                setServings(normalizeServings(value));
+                setServings(normalizeServings(value, sliderMax));
               }}
               minimumTrackTintColor={colors.primary}
               maximumTrackTintColor={colors.border}
               thumbTintColor={colors.primary}
             />
           </View>
-          <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary, marginTop: 8 }}>
-            Ingredients
-          </Text>
-          {recipe.ingredients.map((ing) => {
+          <Pressable
+            onPress={() => setShowIngredients((v) => !v)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}
+          >
+            <Ionicons
+              name={showIngredients ? 'chevron-down' : 'chevron-forward'}
+              size={16}
+              color={colors.textPrimary}
+            />
+            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
+              Ingredients
+            </Text>
+          </Pressable>
+          {showIngredients
+            ? recipe.ingredients.map((ing) => {
             const q = scaleForIngredient(ing, recipe.baseServings, servings);
             return (
               <Text key={ing.id} style={{ fontFamily: 'DMSans_400Regular', color: colors.textPrimary }}>
@@ -414,11 +477,23 @@ export default function RecipeDetailScreen() {
                 {!ing.scalable ? '  ⚠ adjust to taste' : ''}
               </Text>
             );
-          })}
-          <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary, marginTop: 12 }}>
-            Method
-          </Text>
-          {recipe.steps
+          })
+            : null}
+          <Pressable
+            onPress={() => setShowMethod((v) => !v)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
+          >
+            <Ionicons
+              name={showMethod ? 'chevron-down' : 'chevron-forward'}
+              size={16}
+              color={colors.textPrimary}
+            />
+            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
+              Method
+            </Text>
+          </Pressable>
+          {showMethod
+            ? recipe.steps
             .sort((a, b) => a.order - b.order)
             .map((s, idx) => (
               <View key={s.id} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
@@ -438,11 +513,23 @@ export default function RecipeDetailScreen() {
                   {renderStepInstruction(s, recipe.baseServings, servings, unitsMode)}
                 </Text>
               </View>
-            ))}
-          <Text style={{ fontFamily: 'DMSans_700Bold', marginTop: 12, color: colors.textPrimary }}>
-            Cook journal
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            ))
+            : null}
+          <Pressable
+            onPress={() => setShowCookJournal((v) => !v)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
+          >
+            <Ionicons
+              name={showCookJournal ? 'chevron-down' : 'chevron-forward'}
+              size={16}
+              color={colors.textPrimary}
+            />
+            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
+              Cook journal
+            </Text>
+          </Pressable>
+          {showCookJournal ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
             {recipe.cookLogs.map((log) => (
               <Pressable key={log.id} onPress={() => router.push(`/cook-log/${log.id}`)}>
                 <View style={{ width: 120 }}>
@@ -465,7 +552,8 @@ export default function RecipeDetailScreen() {
                 </View>
               </Pressable>
             ))}
-          </ScrollView>
+            </ScrollView>
+          ) : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Cook rating</Text>
             {[1, 2, 3, 4, 5].map((value) => (
@@ -507,19 +595,6 @@ export default function RecipeDetailScreen() {
           >
             <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
           </Pressable>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
-            <Pressable onPress={() => router.push({ pathname: '/recipe/form', params: { recipeId: recipe.id } })}>
-              <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Edit</Text>
-            </Pressable>
-            <Pressable onPress={shareRecipe}>
-              <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Share</Text>
-            </Pressable>
-            <Pressable onPress={() => setShowArchiveRecipeConfirm(true)}>
-              <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
-                {recipe.isArchived ? 'Unarchive' : 'Archive'}
-              </Text>
-            </Pressable>
-          </View>
         </View>
       </ScrollView>
       {AI_ENABLED ? (

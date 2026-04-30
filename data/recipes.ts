@@ -285,7 +285,16 @@ export async function listRecipeCards(
 export async function getAllTags(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ name: string }>(
-    'SELECT name FROM tags ORDER BY name COLLATE NOCASE'
+    `SELECT
+       t.name as name
+     FROM tags t
+     LEFT JOIN recipe_tags rt ON rt.tag_id = t.id
+     LEFT JOIN recipes r ON r.id = rt.recipe_id AND r.is_archived = 0
+     GROUP BY t.id, t.name
+     ORDER BY
+       COUNT(r.id) DESC,
+       MAX(r.updated_at) DESC,
+       t.name COLLATE NOCASE ASC`
   );
   return rows.map((r) => r.name);
 }

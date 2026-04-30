@@ -10,7 +10,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from '@/theme/ThemeContext';
@@ -47,6 +47,16 @@ function InitialLoadingScreen() {
         justifyContent: 'center',
       }}
     >
+      <Image
+        source={require('../assets/mise-app-icon.png')}
+        style={{
+          width: 128,
+          height: 128,
+          borderRadius: 28,
+          marginBottom: 18,
+        }}
+        resizeMode="contain"
+      />
       <Text
         style={{
           fontSize: 34,

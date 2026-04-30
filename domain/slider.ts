@@ -1,5 +1,6 @@
-export function normalizeServings(value: number): number {
-  return Math.min(12, Math.max(1, Math.round(value)));
+export function normalizeServings(value: number, maxServings = 12): number {
+  const safeMax = Math.max(1, Math.round(maxServings));
+  return Math.min(safeMax, Math.max(1, Math.round(value)));
 }
 
 export function shouldCommitSliderTick(

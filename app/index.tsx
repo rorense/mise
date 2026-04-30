@@ -41,6 +41,7 @@ export default function LibraryScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [cuisines, setCuisines] = useState<string[]>([]);
   const [sortMenu, setSortMenu] = useState(false);
+  const [filterMenu, setFilterMenu] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
@@ -311,15 +312,13 @@ export default function LibraryScreen() {
         </View>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ maxHeight: 36, minHeight: 36 }}
-        contentContainerStyle={{
+      <View
+        style={{
+          minHeight: 36,
+          maxHeight: 36,
           paddingHorizontal: 14,
-          paddingBottom: 0,
-          paddingTop: 0,
           gap: 8,
+          flexDirection: 'row',
           alignItems: 'center',
         }}
       >
@@ -371,58 +370,6 @@ export default function LibraryScreen() {
             )
           }
         />
-        <Chip
-          label="Want to cook"
-          active={filter.type === 'want_to_cook'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'want_to_cook'
-                ? { type: 'none' }
-                : { type: 'want_to_cook' }
-            )
-          }
-        />
-        <Chip
-          label="Archived"
-          active={filter.type === 'archived'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
-            )
-          }
-        />
-        {tags.slice(0, 10).map((t) => (
-          <Chip
-            key={t}
-            label={t}
-            active={filter.type === 'tag' && filter.tag === t}
-            colors={colors}
-            onPress={() =>
-              setFilter(
-                filter.type === 'tag' && filter.tag === t
-                  ? { type: 'none' }
-                  : { type: 'tag', tag: t }
-              )
-            }
-          />
-        ))}
-        {cuisines.slice(0, 6).map((c) => (
-          <Chip
-            key={c}
-            label={c}
-            active={filter.type === 'cuisine' && filter.cuisine === c}
-            colors={colors}
-            onPress={() =>
-              setFilter(
-                filter.type === 'cuisine' && filter.cuisine === c
-                  ? { type: 'none' }
-                  : { type: 'cuisine', cuisine: c }
-              )
-            }
-          />
-        ))}
         <Pressable
           onPress={() => setGrid((g) => !g)}
           style={{
@@ -456,6 +403,17 @@ export default function LibraryScreen() {
             {grid ? 'Grid' : 'List'}
           </Text>
         </Pressable>
+        <Chip
+          label="More"
+          active={
+            filter.type === 'want_to_cook' ||
+            filter.type === 'archived' ||
+            filter.type === 'tag' ||
+            filter.type === 'cuisine'
+          }
+          colors={colors}
+          onPress={() => setFilterMenu(true)}
+        />
         <Pressable
           onPress={() => {
             if (bulkMode) {
@@ -522,7 +480,7 @@ export default function LibraryScreen() {
             </Text>
           </Pressable>
         ) : null}
-      </ScrollView>
+      </View>
 
       <FlatList
         key={grid ? 'grid' : 'list'}
@@ -547,17 +505,22 @@ export default function LibraryScreen() {
                 marginBottom: 10,
               }}
             >
-              Your kitchen journal starts here.
+              No recipes yet
             </Text>
-            <Text
+            <Pressable
+              onPress={() => router.push('/import')}
               style={{
-                fontFamily: 'DMSans_400Regular',
-                color: colors.textSecondary,
-                textAlign: 'center',
+                marginTop: 8,
+                backgroundColor: colors.primary,
+                borderRadius: 12,
+                paddingHorizontal: 16,
+                paddingVertical: 10,
               }}
             >
-              Tap + to add your first recipe.
-            </Text>
+              <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+                Add your first recipe
+              </Text>
+            </Pressable>
           </View>
         }
         renderItem={renderCard}
@@ -590,11 +553,11 @@ export default function LibraryScreen() {
             flex: 1,
             backgroundColor: '#0006',
             justifyContent: 'center',
-            padding: 24,
+            padding: 20,
           }}
           onPress={() => setSortMenu(false)}
         >
-          <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 8 }}>
+          <View style={{ backgroundColor: colors.surface, borderRadius: 14, padding: 6 }}>
             {(
               [
                 ['recent_added', 'Recently added'],
@@ -609,9 +572,9 @@ export default function LibraryScreen() {
                   setSort(value);
                   setSortMenu(false);
                 }}
-                style={{ padding: 14 }}
+                style={{ paddingHorizontal: 12, paddingVertical: 11 }}
               >
-                <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
+                <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, fontSize: 14 }}>
                   {label}
                 </Text>
               </Pressable>
@@ -625,7 +588,7 @@ export default function LibraryScreen() {
             flex: 1,
             backgroundColor: '#0006',
             justifyContent: 'center',
-            padding: 24,
+            padding: 20,
           }}
           onPress={() => setBulkTagEditorOpen(false)}
         >
@@ -633,17 +596,17 @@ export default function LibraryScreen() {
             onPress={() => undefined}
             style={{
               backgroundColor: colors.surface,
-              borderRadius: 16,
+              borderRadius: 14,
               borderWidth: 1,
               borderColor: colors.border,
-              padding: 14,
-              gap: 10,
+              padding: 12,
+              gap: 8,
             }}
           >
-            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 20 }}>
+            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 18 }}>
               Bulk tag edit
             </Text>
-            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
+            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary, fontSize: 13 }}>
               Selected recipes: {selectedRecipeIds.length}
             </Text>
             <TextInput
@@ -656,9 +619,10 @@ export default function LibraryScreen() {
                 borderColor: colors.border,
                 borderRadius: 12,
                 paddingHorizontal: 12,
-                paddingVertical: 10,
+                paddingVertical: 9,
                 color: colors.textPrimary,
                 fontFamily: 'DMSans_400Regular',
+                fontSize: 14,
                 backgroundColor: colors.background,
               }}
             />
@@ -672,9 +636,10 @@ export default function LibraryScreen() {
                 borderColor: colors.border,
                 borderRadius: 12,
                 paddingHorizontal: 12,
-                paddingVertical: 10,
+                paddingVertical: 9,
                 color: colors.textPrimary,
                 fontFamily: 'DMSans_400Regular',
+                fontSize: 14,
                 backgroundColor: colors.background,
               }}
             />
@@ -698,8 +663,8 @@ export default function LibraryScreen() {
                   await reload();
                 }}
                 style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 9,
+                  paddingHorizontal: 13,
+                  paddingVertical: 8,
                   borderRadius: 10,
                   backgroundColor: colors.primary,
                 }}
@@ -707,6 +672,98 @@ export default function LibraryScreen() {
                 <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Apply</Text>
               </Pressable>
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal visible={filterMenu} transparent animationType="fade">
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: '#0006',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onPress={() => setFilterMenu(false)}
+        >
+          <Pressable
+            onPress={() => undefined}
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: 14,
+              padding: 10,
+              borderWidth: 1,
+              borderColor: colors.border,
+              gap: 8,
+              maxHeight: '80%',
+            }}
+          >
+            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 18 }}>
+              More filters
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <Chip
+                label="Want to cook"
+                active={filter.type === 'want_to_cook'}
+                colors={colors}
+                onPress={() =>
+                  setFilter(
+                    filter.type === 'want_to_cook'
+                      ? { type: 'none' }
+                      : { type: 'want_to_cook' }
+                  )
+                }
+              />
+              <Chip
+                label="Archived"
+                active={filter.type === 'archived'}
+                colors={colors}
+                onPress={() =>
+                  setFilter(
+                    filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
+                  )
+                }
+              />
+              {tags.map((t) => (
+                <Chip
+                  key={t}
+                  label={`# ${t}`}
+                  active={filter.type === 'tag' && filter.tag === t}
+                  colors={colors}
+                  onPress={() =>
+                    setFilter(
+                      filter.type === 'tag' && filter.tag === t
+                        ? { type: 'none' }
+                        : { type: 'tag', tag: t }
+                    )
+                  }
+                />
+              ))}
+              {cuisines.map((c) => (
+                <Chip
+                  key={c}
+                  label={c}
+                  active={filter.type === 'cuisine' && filter.cuisine === c}
+                  colors={colors}
+                  onPress={() =>
+                    setFilter(
+                      filter.type === 'cuisine' && filter.cuisine === c
+                        ? { type: 'none' }
+                        : { type: 'cuisine', cuisine: c }
+                    )
+                  }
+                />
+              ))}
+            </ScrollView>
+            <Pressable
+              onPress={() => setFilterMenu(false)}
+              style={{
+                alignSelf: 'flex-end',
+                paddingHorizontal: 12,
+                paddingVertical: 7,
+              }}
+            >
+              <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>Done</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
