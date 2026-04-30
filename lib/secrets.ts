@@ -8,6 +8,7 @@ const KEY_APPEARANCE = 'mise_appearance';
 const KEY_ONBOARDED = 'mise_onboarded';
 const KEY_UNITS_DISPLAY = 'mise_units_display';
 const KEY_SEEN_STEP_DRAG_HINT = 'mise_seen_step_drag_hint';
+const recipeServingsCache: Record<string, number> = {};
 
 export async function getOpenAiApiKey(): Promise<string | null> {
   return SecureStore.getItemAsync(KEY_OPENAI);
@@ -66,4 +67,28 @@ export async function getSeenStepDragHint(): Promise<boolean> {
 
 export async function setSeenStepDragHint(seen: boolean): Promise<void> {
   await SecureStore.setItemAsync(KEY_SEEN_STEP_DRAG_HINT, seen ? '1' : '0');
+}
+
+function recipeServingsKey(recipeId: string): string {
+  return `mise_recipe_servings_${recipeId}`;
+}
+
+export async function getRecipeSavedServings(
+  recipeId: string
+): Promise<number | undefined> {
+  if (typeof recipeServingsCache[recipeId] === 'number') {
+    return recipeServingsCache[recipeId];
+  }
+  const raw = await SecureStore.getItemAsync(recipeServingsKey(recipeId));
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return undefined;
+  }
+  recipeServingsCache[recipeId] = parsed;
+  return parsed;
+}
+
+export function setRecipeSavedServings(recipeId: string, servings: number): void {
+  recipeServingsCache[recipeId] = servings;
+  void SecureStore.setItemAsync(recipeServingsKey(recipeId), String(servings));
 }

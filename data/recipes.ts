@@ -18,6 +18,7 @@ type RecipeRow = {
   source_type: SourceType;
   main_image_uri: string | null;
   base_servings: number;
+  last_servings: number | null;
   is_favorite: number;
   want_to_cook: number;
   is_archived: number;
@@ -524,6 +525,35 @@ export async function setRecipeArchived(recipeId: string, archived: boolean): Pr
      SET is_archived = ?, updated_at = ?
      WHERE id = ?`,
     archived ? 1 : 0,
+    new Date().toISOString(),
+    recipeId
+  );
+}
+
+export async function getRecipeServingsOverride(
+  recipeId: string
+): Promise<number | undefined> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ last_servings: number | null }>(
+    'SELECT last_servings FROM recipes WHERE id = ?',
+    recipeId
+  );
+  if (!row || row.last_servings === null || !Number.isFinite(row.last_servings)) {
+    return undefined;
+  }
+  return row.last_servings;
+}
+
+export async function setRecipeServingsOverride(
+  recipeId: string,
+  servings: number
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE recipes
+     SET last_servings = ?, updated_at = ?
+     WHERE id = ?`,
+    servings,
     new Date().toISOString(),
     recipeId
   );

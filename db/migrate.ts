@@ -71,6 +71,9 @@ const MIGRATIONS: Record<number, string> = {
     ALTER TABLE cook_logs ADD COLUMN rating INTEGER;
     CREATE INDEX IF NOT EXISTS idx_recipes_archived ON recipes(is_archived);
   `,
+  5: `
+    ALTER TABLE recipes ADD COLUMN last_servings REAL;
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {

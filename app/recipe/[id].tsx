@@ -5,9 +5,11 @@ import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeCha
 import {
   addCookLog,
   getRecipeById,
+  getRecipeServingsOverride,
   setRecipeArchived,
   setRecipeFlags,
   setRecipeMainImage,
+  setRecipeServingsOverride,
 } from '@/data/recipes';
 import type { Recipe } from '@/types/recipe';
 import {
@@ -21,7 +23,12 @@ import {
   normalizeServings,
   shouldCommitSliderTick,
 } from '@/domain/slider';
-import { getOpenAiApiKey, getUnitsDisplayPreference } from '@/lib/secrets';
+import {
+  getOpenAiApiKey,
+  getRecipeSavedServings,
+  getUnitsDisplayPreference,
+  setRecipeSavedServings,
+} from '@/lib/secrets';
 import {
   compressAndSaveCookPhoto,
   compressAndSaveMainRecipePhoto,
@@ -53,7 +60,8 @@ export default function RecipeDetailScreen() {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<RecipeChatSheetRef>(null);
   const lastSliderCommitAtRef = useRef(0);
-  const lastRecipeIdRef = useRef<string | null>(null);
+  const isSlidingRef = useRef(false);
+  const loadSeqRef = useRef(0);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [servings, setServings] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -71,23 +79,29 @@ export default function RecipeDetailScreen() {
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     const [r, unitsPreference] = await Promise.all([
       getRecipeById(String(id)),
       getUnitsDisplayPreference(),
     ]);
+    if (seq !== loadSeqRef.current) return;
     setUnitsMode(unitsPreference);
     if (r) {
       const maxServings = Math.max(12, Math.round(r.baseServings));
-      setServings((prev) => {
-        if (lastRecipeIdRef.current !== r.id || prev === null) {
-          return normalizeServings(r.baseServings, maxServings);
-        }
-        return normalizeServings(prev, maxServings);
-      });
-      lastRecipeIdRef.current = r.id;
+      const [savedSecure, savedDb] = await Promise.all([
+        getRecipeSavedServings(r.id),
+        getRecipeServingsOverride(r.id),
+      ]);
+      if (seq !== loadSeqRef.current) return;
+      const nextServings =
+        typeof savedSecure === 'number'
+          ? normalizeServings(savedSecure, maxServings)
+          : typeof savedDb === 'number'
+            ? normalizeServings(savedDb, maxServings)
+          : normalizeServings(r.baseServings, maxServings);
+      setServings(nextServings);
       setRecipe(r);
     } else {
-      lastRecipeIdRef.current = null;
       setRecipe(null);
       setServings(null);
     }
@@ -438,17 +452,28 @@ export default function RecipeDetailScreen() {
               maximumValue={sliderMax}
               step={1}
               value={servings}
+              onSlidingStart={() => {
+                isSlidingRef.current = true;
+              }}
               onValueChange={(value) => {
+                if (!isSlidingRef.current) {
+                  return;
+                }
                 const now = Date.now();
                 if (!shouldCommitSliderTick(lastSliderCommitAtRef.current, now)) {
                   return;
                 }
                 lastSliderCommitAtRef.current = now;
-                setServings(normalizeServings(value, sliderMax));
+                const nextServings = normalizeServings(value, sliderMax);
+                setServings(nextServings);
               }}
               onSlidingComplete={(value) => {
+                isSlidingRef.current = false;
                 lastSliderCommitAtRef.current = Date.now();
-                setServings(normalizeServings(value, sliderMax));
+                const nextServings = normalizeServings(value, sliderMax);
+                setServings(nextServings);
+                setRecipeSavedServings(recipe.id, nextServings);
+                void setRecipeServingsOverride(recipe.id, nextServings);
               }}
               minimumTrackTintColor={colors.primary}
               maximumTrackTintColor={colors.border}

@@ -7,13 +7,13 @@ import {
   type LibrarySort,
   type RecipeListItem,
 } from '@/data/recipes';
-import { formatFilterLabel, formatSortLabel } from '@/domain/libraryLabels';
+import { formatSortLabel } from '@/domain/libraryLabels';
 import { getOnboarded } from '@/lib/secrets';
 import { useTheme } from '@/theme/ThemeContext';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -81,8 +81,6 @@ export default function LibraryScreen() {
       reload();
     }, [reload])
   );
-
-  const filterLabel = useMemo(() => formatFilterLabel(filter), [filter]);
 
   const renderCard = ({ item }: { item: RecipeListItem }) => (
     <Pressable
@@ -328,14 +326,6 @@ export default function LibraryScreen() {
           colors={colors}
           onPress={() => setSortMenu(true)}
         />
-        {filter.type !== 'none' ? (
-          <Chip
-            label={`Clear (${filterLabel})`}
-            active
-            colors={colors}
-            onPress={() => setFilter({ type: 'none' })}
-          />
-        ) : null}
         <Chip
           label="Cooked"
           active={filter.type === 'recently_cooked'}

@@ -42,26 +42,20 @@ function InitialLoadingScreen() {
     <View
       style={{
         flex: 1,
-        backgroundColor: '#FAF8F5',
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
       <Image
-        source={require('../assets/mise-app-icon.png')}
-        style={{
-          width: 128,
-          height: 128,
-          borderRadius: 28,
-          marginBottom: 18,
-        }}
-        resizeMode="contain"
+        source={require('../assets/icon.png')}
+        style={{ width: 84, height: 84, borderRadius: 20, marginBottom: 14 }}
       />
       <Text
         style={{
           fontSize: 34,
           color: '#1A1A1A',
-          marginBottom: 14,
+          marginBottom: 12,
         }}
       >
         Mise
