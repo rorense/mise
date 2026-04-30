@@ -23,13 +23,14 @@ function ThemedStack() {
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
+          headerShown: false,
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.textPrimary,
           headerTitleStyle: { fontFamily: 'Lora_700Bold' },
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="index" />
       </Stack>
     </>
   );
