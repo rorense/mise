@@ -4,10 +4,12 @@ import {
   extractYoutubeVideoId,
   fetchYoutubeDescription,
 } from '@/lib/import/youtube';
+import type { AiProvider } from '@/lib/secrets';
 import type { Recipe, SourceType } from '@/types/recipe';
 
 export async function importFromUrl(
   url: string,
+  provider: AiProvider,
   apiKey: string,
   youtubeApiKey: string | null
 ): Promise<Omit<Recipe, 'cookLogs'>> {
@@ -34,7 +36,7 @@ export async function importFromUrl(
       youtubeApiKey
     );
     const content = `${title}\n\n${description}`;
-    return extractRecipeFromText(apiKey, {
+    return extractRecipeFromText(provider, apiKey, {
       sourceType: 'youtube',
       sourceUrl: normalized,
       content,
@@ -51,7 +53,7 @@ export async function importFromUrl(
   const content = hint
     ? `Structured hint:\nTitle: ${hint.title ?? ''}\nDescription: ${hint.description ?? ''}\n\nPage excerpt:\n${excerpt}`
     : excerpt;
-  return extractRecipeFromText(apiKey, {
+  return extractRecipeFromText(provider, apiKey, {
     sourceType: 'url',
     sourceUrl: normalized,
     content,
@@ -60,9 +62,10 @@ export async function importFromUrl(
 
 export async function importFromInstagramCaption(
   caption: string,
+  provider: AiProvider,
   apiKey: string
 ): Promise<Omit<Recipe, 'cookLogs'>> {
-  return extractRecipeFromText(apiKey, {
+  return extractRecipeFromText(provider, apiKey, {
     sourceType: 'instagram',
     sourceUrl: '',
     content: caption,
@@ -71,10 +74,11 @@ export async function importFromInstagramCaption(
 
 export async function importFromManualText(
   text: string,
+  provider: AiProvider,
   apiKey: string,
   sourceType: SourceType
 ): Promise<Omit<Recipe, 'cookLogs'>> {
-  return extractRecipeFromText(apiKey, {
+  return extractRecipeFromText(provider, apiKey, {
     sourceType,
     sourceUrl: '',
     content: text,

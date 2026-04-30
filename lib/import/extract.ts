@@ -1,5 +1,6 @@
 import { newId } from '@/lib/id';
-import { chatCompletion } from '@/lib/openai';
+import { llmCompletion } from '@/lib/llm';
+import type { AiProvider } from '@/lib/secrets';
 import type { Ingredient, Recipe, SourceType, Step } from '@/types/recipe';
 
 const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified JSON matching this TypeScript shape (no markdown fences):
@@ -137,6 +138,7 @@ export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
 }
 
 export async function extractRecipeFromText(
+  provider: AiProvider,
   apiKey: string,
   payload: {
     sourceType: SourceType;
@@ -150,10 +152,15 @@ Source URL (may be empty): ${payload.sourceUrl}
 Content:
 ${payload.content.slice(0, 24000)}`;
 
-  const raw = await chatCompletion(apiKey, [
-    { role: 'system', content: SYSTEM },
-    { role: 'user', content: user },
-  ], { temperature: 0.2 });
+  const raw = await llmCompletion(
+    provider,
+    apiKey,
+    [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: user },
+    ],
+    { temperature: 0.2 }
+  );
 
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
   const parsed = parseRecipeJson(cleaned);

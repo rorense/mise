@@ -1,15 +1,16 @@
 import { exportBackupJson, restoreBackupJson } from '@/data/backup';
+import { getActiveAiProvider } from '@/lib/aiConfig';
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
 import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import {
-  deleteOpenAiApiKey,
+  getAiProvider,
   getAppearance,
   getUnitsDisplayPreference,
-  getOpenAiApiKey,
   getYoutubeApiKey,
+  setAiProvider,
   setUnitsDisplayPreference,
-  setOpenAiApiKey,
+  type AiProvider,
   setYoutubeApiKey,
   type UnitsDisplayPreference,
 } from '@/lib/secrets';
@@ -29,7 +30,7 @@ import {
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
-  const [openai, setOpenai] = useState('');
+  const [aiProvider, setAiProviderState] = useState<AiProvider>('openai');
   const [youtube, setYoutube] = useState('');
   const [storage, setStorage] = useState('—');
   const [unitsDisplay, setUnitsDisplay] =
@@ -41,13 +42,13 @@ export default function SettingsScreen() {
   } | null>(null);
 
   const load = useCallback(async () => {
-    const [oa, yt, bytes] = await Promise.all([
-      getOpenAiApiKey(),
+    const [provider, yt, bytes] = await Promise.all([
+      getAiProvider(),
       getYoutubeApiKey(),
       estimateAppStorageBytes(),
     ]);
     const units = await getUnitsDisplayPreference();
-    setOpenai(oa ?? '');
+    setAiProviderState(provider);
     setYoutube(yt ?? '');
     setStorage(formatBytes(bytes));
     setUnitsDisplay(units);
@@ -59,12 +60,6 @@ export default function SettingsScreen() {
     }, [load])
   );
 
-  const masked = (k: string) => {
-    if (!k) return '';
-    if (k.length <= 8) return '••••••••';
-    return `${k.slice(0, 8)}••••••••`;
-  };
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
@@ -73,61 +68,44 @@ export default function SettingsScreen() {
         contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 20, paddingBottom: 48 }}
       >
         <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-          Keys
+          AI
         </Text>
       <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-        Stored in SecureStore. Never logged.
+        API keys are read from local env files in the codebase.
       </Text>
       <View>
         <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, marginBottom: 6 }}>
-          OpenAI API key
+          Provider
         </Text>
-        <TextInput
-          value={openai}
-          onChangeText={setOpenai}
-          placeholder="sk-..."
-          placeholderTextColor={colors.textSecondary}
-          autoCapitalize="none"
-          secureTextEntry
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 12,
-            padding: 12,
-            fontFamily: 'DMSans_400Regular',
-            color: colors.textPrimary,
-            backgroundColor: colors.surface,
-          }}
-        />
-        <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-          Saved: {masked(openai)}
-        </Text>
-        <Pressable
-          onPress={async () => {
-            await setOpenAiApiKey(openai.trim());
-            setDialog({ title: 'Saved', message: 'OpenAI key updated.' });
-          }}
-          style={{
-            marginTop: 10,
-            backgroundColor: colors.primary,
-            padding: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save OpenAI key</Text>
-        </Pressable>
-        <Pressable
-          onPress={async () => {
-            await deleteOpenAiApiKey();
-            setOpenai('');
-          }}
-          style={{ marginTop: 8 }}
-        >
-          <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
-            Remove OpenAI key
-          </Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {(['openai', 'gemini'] as AiProvider[]).map((provider) => (
+            <Pressable
+              key={provider}
+              onPress={async () => {
+                setAiProviderState(provider);
+                await setAiProvider(provider);
+                const active = await getActiveAiProvider();
+                setDialog({
+                  title: 'Saved',
+                  message: `AI provider set to ${active === 'gemini' ? 'Gemini' : 'OpenAI'}.`,
+                });
+              }}
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderRadius: 999,
+                backgroundColor:
+                  aiProvider === provider ? colors.primary + '33' : colors.surface,
+                borderWidth: 1,
+                borderColor: aiProvider === provider ? colors.primary : colors.border,
+              }}
+            >
+              <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
+                {provider === 'gemini' ? 'Gemini' : 'OpenAI'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
 
       <View>

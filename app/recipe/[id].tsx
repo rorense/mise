@@ -24,7 +24,7 @@ import {
   shouldCommitSliderTick,
 } from '@/domain/slider';
 import {
-  getOpenAiApiKey,
+  getAiProvider,
   getRecipeSavedServings,
   getUnitsDisplayPreference,
   setRecipeSavedServings,
@@ -33,6 +33,7 @@ import {
   compressAndSaveCookPhoto,
   compressAndSaveMainRecipePhoto,
 } from '@/lib/media';
+import { getBundledAiKey } from '@/lib/aiConfig';
 import { newId } from '@/lib/id';
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -816,16 +817,17 @@ export default function RecipeDetailScreen() {
                 });
                 return;
               }
-              const key = await getOpenAiApiKey();
+              const provider = await getAiProvider();
+              const key = getBundledAiKey(provider);
               if (!key) {
                 setDialog({
                   title: 'API key',
-                  message: 'Add your OpenAI key in Settings.',
+                  message: 'Missing API key in local env.',
                   actions: [{ label: 'OK', variant: 'primary' }],
                 });
                 return;
               }
-              sheetRef.current?.present(recipe, servings, key);
+              sheetRef.current?.present(recipe, servings, provider, key);
             }}
             style={{
               position: 'absolute',

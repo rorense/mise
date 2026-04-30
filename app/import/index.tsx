@@ -1,5 +1,6 @@
 import { AppDialog, type AppDialogAction } from '@/components/AppDialog';
-import { getOpenAiApiKey, getYoutubeApiKey } from '@/lib/secrets';
+import { getActiveAiProvider, getBundledAiKey } from '@/lib/aiConfig';
+import { getYoutubeApiKey } from '@/lib/secrets';
 import { BackButton } from '@/components/BackButton';
 import { importFromInstagramCaption, importFromUrl } from '@/lib/import/pipeline';
 import { setImportDraft } from '@/lib/importDraftStore';
@@ -68,11 +69,12 @@ export default function ImportScreen() {
       });
       return;
     }
-    const key = await getOpenAiApiKey();
+    const provider = await getActiveAiProvider();
+    const key = getBundledAiKey(provider);
     if (!key) {
       setDialog({
         title: 'API key',
-        message: 'Add an OpenAI API key in Settings.',
+        message: `Missing ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in local env.`,
         actions: [{ label: 'OK', variant: 'primary' }],
       });
       return;
@@ -80,7 +82,7 @@ export default function ImportScreen() {
     const yt = await getYoutubeApiKey();
     setBusy(true);
     try {
-      const draft = await importFromUrl(trimmedUrl, key, yt);
+      const draft = await importFromUrl(trimmedUrl, provider, key, yt);
       setImportDraft(draft);
       router.push('/import/preview');
     } catch (e) {
@@ -120,18 +122,19 @@ export default function ImportScreen() {
       });
       return;
     }
-    const key = await getOpenAiApiKey();
+    const provider = await getActiveAiProvider();
+    const key = getBundledAiKey(provider);
     if (!key) {
       setDialog({
         title: 'API key',
-        message: 'Add an OpenAI API key in Settings.',
+        message: `Missing ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in local env.`,
         actions: [{ label: 'OK', variant: 'primary' }],
       });
       return;
     }
     setBusy(true);
     try {
-      const draft = await importFromInstagramCaption(trimmedCaption, key);
+      const draft = await importFromInstagramCaption(trimmedCaption, provider, key);
       setImportDraft(draft);
       router.push('/import/preview');
     } catch (e) {

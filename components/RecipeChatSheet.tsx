@@ -1,5 +1,6 @@
 import { recipeToChatSystemPrompt } from '@/lib/chatPrompt';
-import { chatCompletion, type ChatMessage } from '@/lib/openai';
+import { llmCompletion, type LlmMessage } from '@/lib/llm';
+import type { AiProvider } from '@/lib/secrets';
 import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
@@ -14,17 +15,23 @@ import React, {
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 export type RecipeChatSheetRef = {
-  present: (recipe: Recipe, servings: number, apiKey: string) => void;
+  present: (
+    recipe: Recipe,
+    servings: number,
+    provider: AiProvider,
+    apiKey: string
+  ) => void;
 };
 
 export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeChatSheet(_, ref) {
   const { colors } = useTheme();
   const modalRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%', '90%'], []);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<LlmMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const keyRef = useRef('');
+  const providerRef = useRef<AiProvider>('openai');
   const [ctx, setCtx] = useState<{ recipe: Recipe; servings: number } | null>(null);
 
   const renderBackdrop = useCallback(
@@ -35,8 +42,9 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
   );
 
   useImperativeHandle(ref, () => ({
-    present(recipe, servings, key) {
+    present(recipe, servings, provider, key) {
       keyRef.current = key;
+      providerRef.current = provider;
       setCtx({ recipe, servings });
       setMessages([]);
       setInput('');
@@ -48,16 +56,17 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
     const trimmed = text.trim();
     if (!trimmed || !ctx) return;
     const sys = recipeToChatSystemPrompt(ctx.recipe, ctx.servings);
-    const nextUser: ChatMessage = { role: 'user', content: trimmed };
+    const nextUser: LlmMessage = { role: 'user', content: trimmed };
     const history = [...messages, nextUser].slice(-20);
     setMessages([...messages, nextUser]);
     setInput('');
     setBusy(true);
     try {
-      const reply = await chatCompletion(keyRef.current, [
-        { role: 'system', content: sys },
-        ...history,
-      ]);
+      const reply = await llmCompletion(
+        providerRef.current,
+        keyRef.current,
+        [{ role: 'system', content: sys }, ...history]
+      );
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
     } catch (error) {
       const text =
