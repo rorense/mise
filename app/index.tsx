@@ -6,6 +6,7 @@ import {
   type LibrarySort,
   type RecipeListItem,
 } from '@/data/recipes';
+import { formatFilterLabel, formatSortLabel } from '@/domain/libraryLabels';
 import { useTheme } from '@/theme/ThemeContext';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,13 +56,7 @@ export default function LibraryScreen() {
     }, [reload])
   );
 
-  const filterLabel = useMemo(() => {
-    if (filter.type === 'tag') return `Tag: ${filter.tag}`;
-    if (filter.type === 'cuisine') return `Cuisine: ${filter.cuisine}`;
-    if (filter.type === 'recently_cooked') return 'Cooked';
-    if (filter.type === 'never_cooked') return 'Never cooked';
-    return 'All';
-  }, [filter]);
+  const filterLabel = useMemo(() => formatFilterLabel(filter), [filter]);
 
   const renderCard = ({ item }: { item: RecipeListItem }) => (
     <Pressable
@@ -211,7 +206,7 @@ export default function LibraryScreen() {
         contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 8, gap: 8 }}
       >
         <Chip
-          label={`Sort: ${sort.replace('_', ' ')}`}
+          label={formatSortLabel(sort)}
           active
           colors={colors}
           onPress={() => setSortMenu(true)}
@@ -409,18 +404,24 @@ function Chip({
       onPress={onPress}
       style={{
         paddingHorizontal: 14,
-        paddingVertical: 8,
+        paddingVertical: 5,
+        minHeight: 30,
         borderRadius: 999,
         backgroundColor: active ? colors.primary + '22' : colors.surface,
         borderWidth: 1,
         borderColor: active ? colors.primary : colors.border,
+        alignSelf: 'flex-start',
+        justifyContent: 'center',
       }}
     >
       <Text
         style={{
           fontFamily: 'DMSans_500Medium',
+          fontSize: 13,
+          lineHeight: 16,
           color: active ? colors.primary : colors.textPrimary,
         }}
+        numberOfLines={1}
       >
         {label}
       </Text>
