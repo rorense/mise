@@ -1,0 +1,9 @@
+# Mise (Expo) — project conventions
+
+- **Stack:** Expo SDK 52, React Native 0.76, TypeScript **strict**.
+- **UI:** Functional components only; no class components.
+- **Storage:** `expo-sqlite` for all structured recipe data; `expo-file-system` for cook photos; `expo-secure-store` for OpenAI API key and appearance preference.
+- **Units:** Persist **metric only** (`g`, `kg`, `ml`, `l`, `cm`, `°C`, `tsp`, `tbsp` as needed). No imperial in stored data.
+- **Scaling:** Ingredients are structured objects; step text uses placeholders + `scalableQuantities` from import — do not regex-replace quantities in free text at runtime.
+- **Networking:** OpenAI for import + recipe-scoped chat only; use `@react-native-community/netinfo` for offline UX.
+- **Imports:** Prefer path alias `@/` for app root where configured.
