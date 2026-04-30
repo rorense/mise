@@ -38,7 +38,7 @@ import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
   Linking,
@@ -64,10 +64,15 @@ export default function RecipeDetailScreen() {
   const loadSeqRef = useRef(0);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [servings, setServings] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMissing, setIsMissing] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
   const [showArchiveRecipeConfirm, setShowArchiveRecipeConfirm] = useState(false);
   const [unitsMode, setUnitsMode] = useState<UnitsDisplayMode>('compact');
+  const [readMode, setReadMode] = useState(false);
+  const [checklistMode, setChecklistMode] = useState(false);
+  const [checkedIngredientIds, setCheckedIngredientIds] = useState<string[]>([]);
   const [showIngredients, setShowIngredients] = useState(true);
   const [showMethod, setShowMethod] = useState(true);
   const [showCookJournal, setShowCookJournal] = useState(true);
@@ -79,6 +84,8 @@ export default function RecipeDetailScreen() {
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
+    setIsLoading(true);
+    setIsMissing(false);
     const seq = ++loadSeqRef.current;
     const [r, unitsPreference] = await Promise.all([
       getRecipeById(String(id)),
@@ -104,7 +111,9 @@ export default function RecipeDetailScreen() {
     } else {
       setRecipe(null);
       setServings(null);
+      setIsMissing(true);
     }
+    setIsLoading(false);
   }, [id]);
 
   useFocusEffect(
@@ -113,10 +122,41 @@ export default function RecipeDetailScreen() {
     }, [reload])
   );
 
-  if (!recipe || servings === null) {
+  useEffect(() => {
+    if (!recipe) return;
+    setCheckedIngredientIds((prev) =>
+      prev.filter((id) => recipe.ingredients.some((ingredient) => ingredient.id === id))
+    );
+  }, [recipe]);
+
+  if (isLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
         <Text style={{ color: colors.textSecondary }}>Loading…</Text>
+      </View>
+    );
+  }
+
+  if (isMissing || !recipe || servings === null) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, paddingHorizontal: 24 }}>
+        <Text style={{ color: colors.textPrimary, fontFamily: 'Lora_700Bold', fontSize: 20, marginBottom: 8 }}>
+          Recipe not found
+        </Text>
+        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 14 }}>
+          This recipe may have been removed.
+        </Text>
+        <Pressable
+          onPress={() => router.replace('/')}
+          style={{
+            backgroundColor: colors.primary,
+            borderRadius: 12,
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+          }}
+        >
+          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Back to library</Text>
+        </Pressable>
       </View>
     );
   }
@@ -261,6 +301,14 @@ export default function RecipeDetailScreen() {
     await reload();
   };
 
+  const toggleIngredientChecked = (ingredientId: string) => {
+    setCheckedIngredientIds((prev) =>
+      prev.includes(ingredientId)
+        ? prev.filter((id) => id !== ingredientId)
+        : [...prev, ingredientId]
+    );
+  };
+
   const openQuickActions = () => {
     setDialog({
       title: 'Recipe actions',
@@ -280,6 +328,36 @@ export default function RecipeDetailScreen() {
         },
       ],
     });
+  };
+
+  const toggleFavorite = async () => {
+    const nextValue = !recipe.isFavorite;
+    setRecipe({ ...recipe, isFavorite: nextValue });
+    try {
+      await setRecipeFlags(recipe.id, { isFavorite: nextValue });
+    } catch {
+      setRecipe({ ...recipe, isFavorite: !nextValue });
+      setDialog({
+        title: 'Could not update',
+        message: 'Please try again.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
+    }
+  };
+
+  const toggleWantToCook = async () => {
+    const nextValue = !recipe.wantToCook;
+    setRecipe({ ...recipe, wantToCook: nextValue });
+    try {
+      await setRecipeFlags(recipe.id, { wantToCook: nextValue });
+    } catch {
+      setRecipe({ ...recipe, wantToCook: !nextValue });
+      setDialog({
+        title: 'Could not update',
+        message: 'Please try again.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
+    }
   };
 
   return (
@@ -341,6 +419,25 @@ export default function RecipeDetailScreen() {
               {recipe.title}
             </Text>
             <Pressable
+              onPress={() => setReadMode((v) => !v)}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: readMode ? colors.primary : colors.border,
+                backgroundColor: readMode ? colors.primary + '22' : colors.surface,
+              }}
+            >
+              <Ionicons
+                name={readMode ? 'book' : 'book-outline'}
+                size={18}
+                color={readMode ? colors.primary : colors.textPrimary}
+              />
+            </Pressable>
+            <Pressable
               onPress={openQuickActions}
               style={{
                 width: 34,
@@ -356,7 +453,7 @@ export default function RecipeDetailScreen() {
               <Ionicons name="ellipsis-horizontal" size={18} color={colors.textPrimary} />
             </Pressable>
           </View>
-          {recipe.sourceUrl ? (
+          {!readMode && recipe.sourceUrl ? (
             <Text
               onPress={() => Linking.openURL(recipe.sourceUrl)}
               style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}
@@ -364,16 +461,16 @@ export default function RecipeDetailScreen() {
               Open source
             </Text>
           ) : null}
-          <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
+          {!readMode ? (
+            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
             {recipe.cuisine ? `${recipe.cuisine} · ` : ''}
             {recipe.tags.join(' · ')}
           </Text>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
+          ) : null}
+          {!readMode ? (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable
-              onPress={async () => {
-                await setRecipeFlags(recipe.id, { isFavorite: !recipe.isFavorite });
-                reload();
-              }}
+              onPress={toggleFavorite}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -401,10 +498,7 @@ export default function RecipeDetailScreen() {
               </Text>
             </Pressable>
             <Pressable
-              onPress={async () => {
-                await setRecipeFlags(recipe.id, { wantToCook: !recipe.wantToCook });
-                reload();
-              }}
+              onPress={toggleWantToCook}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -431,6 +525,54 @@ export default function RecipeDetailScreen() {
                 Want to cook
               </Text>
             </Pressable>
+            </View>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Pressable
+              onPress={() => setChecklistMode((v) => !v)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 999,
+                backgroundColor: checklistMode ? colors.primary + '22' : colors.surface,
+                borderWidth: 1,
+                borderColor: checklistMode ? colors.primary : colors.border,
+              }}
+            >
+              <Ionicons
+                name={checklistMode ? 'checkbox' : 'checkbox-outline'}
+                size={14}
+                color={checklistMode ? colors.primary : colors.textPrimary}
+              />
+              <Text
+                style={{
+                  fontFamily: 'DMSans_500Medium',
+                  color: checklistMode ? colors.primary : colors.textPrimary,
+                }}
+              >
+                Checklist
+              </Text>
+            </Pressable>
+            {checklistMode ? (
+              <Pressable
+                onPress={() => setCheckedIngredientIds([])}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 999,
+                  backgroundColor: colors.surface,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                }}
+              >
+                <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
+                  Reset checks
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
           <View
             style={{
@@ -493,14 +635,41 @@ export default function RecipeDetailScreen() {
               Ingredients
             </Text>
           </Pressable>
-          {showIngredients
+          {(readMode || showIngredients)
             ? recipe.ingredients.map((ing) => {
             const q = scaleForIngredient(ing, recipe.baseServings, servings);
+            const checked = checkedIngredientIds.includes(ing.id);
             return (
-              <Text key={ing.id} style={{ fontFamily: 'DMSans_400Regular', color: colors.textPrimary }}>
-                · {formatQuantity(q, ing.unit, unitsMode)} {ing.name}
-                {!ing.scalable ? '  ⚠ adjust to taste' : ''}
-              </Text>
+              <Pressable
+                key={ing.id}
+                onPress={() => {
+                  if (checklistMode) {
+                    toggleIngredientChecked(ing.id);
+                  }
+                }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 }}
+              >
+                {checklistMode ? (
+                  <Ionicons
+                    name={checked ? 'checkbox' : 'square-outline'}
+                    size={18}
+                    color={checked ? colors.primary : colors.textSecondary}
+                  />
+                ) : null}
+                <Text
+                  style={{
+                    fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
+                    color: checked ? colors.textSecondary : colors.textPrimary,
+                    textDecorationLine: checked ? 'line-through' : 'none',
+                    fontSize: readMode ? 17 : 15,
+                    lineHeight: readMode ? 26 : 21,
+                  }}
+                >
+                  {!checklistMode ? '· ' : ''}
+                  {formatQuantity(q, ing.unit, unitsMode)} {ing.name}
+                  {!ing.scalable ? '  ⚠ adjust to taste' : ''}
+                </Text>
+              </Pressable>
             );
           })
             : null}
@@ -517,7 +686,7 @@ export default function RecipeDetailScreen() {
               Method
             </Text>
           </Pressable>
-          {showMethod
+          {(readMode || showMethod)
             ? recipe.steps
             .sort((a, b) => a.order - b.order)
             .map((s, idx) => (
@@ -534,92 +703,104 @@ export default function RecipeDetailScreen() {
                 >
                   <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>{idx + 1}</Text>
                 </View>
-                <Text style={{ flex: 1, fontFamily: 'DMSans_400Regular', color: colors.textPrimary, lineHeight: 22 }}>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
+                    color: colors.textPrimary,
+                    fontSize: readMode ? 17 : 15,
+                    lineHeight: readMode ? 28 : 22,
+                  }}
+                >
                   {renderStepInstruction(s, recipe.baseServings, servings, unitsMode)}
                 </Text>
               </View>
             ))
             : null}
-          <Pressable
-            onPress={() => setShowCookJournal((v) => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
-          >
-            <Ionicons
-              name={showCookJournal ? 'chevron-down' : 'chevron-forward'}
-              size={16}
-              color={colors.textPrimary}
-            />
-            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-              Cook journal
-            </Text>
-          </Pressable>
-          {showCookJournal ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-            {recipe.cookLogs.map((log) => (
-              <Pressable key={log.id} onPress={() => router.push(`/cook-log/${log.id}`)}>
-                <View style={{ width: 120 }}>
-                  {log.photoUri ? (
-                    <Image source={{ uri: log.photoUri }} style={{ width: 120, height: 120, borderRadius: 14 }} />
-                  ) : (
-                    <View
-                      style={{
-                        width: 120,
-                        height: 120,
-                        borderRadius: 14,
-                        backgroundColor: colors.border,
-                      }}
-                    />
-                  )}
-                  <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
-                    {new Date(log.cookedAt).toLocaleDateString()}
-                    {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
-            </ScrollView>
-          ) : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Cook rating</Text>
-            {[1, 2, 3, 4, 5].map((value) => (
+          {!readMode ? (
+            <>
               <Pressable
-                key={value}
-                onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
+                onPress={() => setShowCookJournal((v) => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
               >
                 <Ionicons
-                  name={ratingDraft !== null && value <= ratingDraft ? 'star' : 'star-outline'}
-                  size={18}
-                  color={ratingDraft !== null && value <= ratingDraft ? '#FFD166' : colors.textSecondary}
+                  name={showCookJournal ? 'chevron-down' : 'chevron-forward'}
+                  size={16}
+                  color={colors.textPrimary}
                 />
+                <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
+                  Cook journal
+                </Text>
               </Pressable>
-            ))}
-          </View>
-          <TextInput
-            placeholder="Notes for this cook (optional)"
-            placeholderTextColor={colors.textSecondary}
-            value={noteDraft}
-            onChangeText={setNoteDraft}
-            style={{
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 12,
-              padding: 12,
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textPrimary,
-              backgroundColor: colors.surface,
-            }}
-          />
-          <Pressable
-            onPress={logCook}
-            style={{
-              backgroundColor: colors.primary,
-              padding: 14,
-              borderRadius: 14,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
-          </Pressable>
+              {showCookJournal ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                  {recipe.cookLogs.map((log) => (
+                    <Pressable key={log.id} onPress={() => router.push(`/cook-log/${log.id}`)}>
+                      <View style={{ width: 120 }}>
+                        {log.photoUri ? (
+                          <Image source={{ uri: log.photoUri }} style={{ width: 120, height: 120, borderRadius: 14 }} />
+                        ) : (
+                          <View
+                            style={{
+                              width: 120,
+                              height: 120,
+                              borderRadius: 14,
+                              backgroundColor: colors.border,
+                            }}
+                          />
+                        )}
+                        <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
+                          {new Date(log.cookedAt).toLocaleDateString()}
+                          {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              ) : null}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Cook rating</Text>
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
+                  >
+                    <Ionicons
+                      name={ratingDraft !== null && value <= ratingDraft ? 'star' : 'star-outline'}
+                      size={18}
+                      color={ratingDraft !== null && value <= ratingDraft ? '#FFD166' : colors.textSecondary}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput
+                placeholder="Notes for this cook (optional)"
+                placeholderTextColor={colors.textSecondary}
+                value={noteDraft}
+                onChangeText={setNoteDraft}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 12,
+                  padding: 12,
+                  fontFamily: 'DMSans_400Regular',
+                  color: colors.textPrimary,
+                  backgroundColor: colors.surface,
+                }}
+              />
+              <Pressable
+                onPress={logCook}
+                style={{
+                  backgroundColor: colors.primary,
+                  padding: 14,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
+              </Pressable>
+            </>
+          ) : null}
         </View>
       </ScrollView>
       {AI_ENABLED ? (

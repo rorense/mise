@@ -89,14 +89,15 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
 
     for (const row of parsed.tables.recipes) {
       await db.runAsync(
-        `INSERT INTO recipes (id, title, source_url, source_type, main_image_uri, base_servings, is_favorite, want_to_cook, is_archived, cuisine, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO recipes (id, title, source_url, source_type, main_image_uri, base_servings, last_servings, is_favorite, want_to_cook, is_archived, cuisine, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         row.id,
         row.title,
         row.source_url ?? '',
         row.source_type,
         row.main_image_uri ?? null,
         row.base_servings,
+        row.last_servings ?? null,
         row.is_favorite ?? 0,
         row.want_to_cook ?? 0,
         row.is_archived ?? 0,

@@ -13,7 +13,7 @@ import { useTheme } from '@/theme/ThemeContext';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -48,6 +48,7 @@ export default function LibraryScreen() {
   const [bulkTagEditorOpen, setBulkTagEditorOpen] = useState(false);
   const [bulkAddTags, setBulkAddTags] = useState('');
   const [bulkRemoveTags, setBulkRemoveTags] = useState('');
+  const reloadSeqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,11 +67,13 @@ export default function LibraryScreen() {
   }, [router]);
 
   const reload = useCallback(async () => {
+    const seq = ++reloadSeqRef.current;
     const [t, c, rows] = await Promise.all([
       getAllTags(),
       getAllCuisines(),
       listRecipeCards(query, filter, sort),
     ]);
+    if (seq !== reloadSeqRef.current) return;
     setTags(t);
     setCuisines(c);
     setItems(rows);
@@ -234,6 +237,9 @@ export default function LibraryScreen() {
     </Pressable>
   );
 
+  const hasActiveSearchOrFilter =
+    query.trim().length > 0 || filter.type !== 'none';
+
   if (!onboardingChecked) {
     return (
       <View
@@ -310,13 +316,15 @@ export default function LibraryScreen() {
         </View>
       </View>
 
-      <View
-        style={{
-          minHeight: 36,
-          maxHeight: 36,
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ maxHeight: 36, minHeight: 36 }}
+        contentContainerStyle={{
           paddingHorizontal: 14,
+          paddingBottom: 0,
+          paddingTop: 0,
           gap: 8,
-          flexDirection: 'row',
           alignItems: 'center',
         }}
       >
@@ -335,28 +343,6 @@ export default function LibraryScreen() {
               filter.type === 'recently_cooked'
                 ? { type: 'none' }
                 : { type: 'recently_cooked' }
-            )
-          }
-        />
-        <Chip
-          label="Never"
-          active={filter.type === 'never_cooked'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'never_cooked'
-                ? { type: 'none' }
-                : { type: 'never_cooked' }
-            )
-          }
-        />
-        <Chip
-          label="Favorites"
-          active={filter.type === 'favorite'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
             )
           }
         />
@@ -470,7 +456,7 @@ export default function LibraryScreen() {
             </Text>
           </Pressable>
         ) : null}
-      </View>
+      </ScrollView>
 
       <FlatList
         key={grid ? 'grid' : 'list'}
@@ -495,22 +481,44 @@ export default function LibraryScreen() {
                 marginBottom: 10,
               }}
             >
-              No recipes yet
+              {hasActiveSearchOrFilter ? 'No matching recipes' : 'No recipes yet'}
             </Text>
-            <Pressable
-              onPress={() => router.push('/import')}
-              style={{
-                marginTop: 8,
-                backgroundColor: colors.primary,
-                borderRadius: 12,
-                paddingHorizontal: 16,
-                paddingVertical: 10,
-              }}
-            >
-              <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-                Add your first recipe
-              </Text>
-            </Pressable>
+            {hasActiveSearchOrFilter ? (
+              <Pressable
+                onPress={() => {
+                  setQuery('');
+                  setFilter({ type: 'none' });
+                }}
+                style={{
+                  marginTop: 8,
+                  backgroundColor: colors.surface,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                }}
+              >
+                <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
+                  Clear filters
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => router.push('/import')}
+                style={{
+                  marginTop: 8,
+                  backgroundColor: colors.primary,
+                  borderRadius: 12,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                }}
+              >
+                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+                  Add your first recipe
+                </Text>
+              </Pressable>
+            )}
           </View>
         }
         renderItem={renderCard}
@@ -691,6 +699,28 @@ export default function LibraryScreen() {
               More filters
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <Chip
+                label="Favorites"
+                active={filter.type === 'favorite'}
+                colors={colors}
+                onPress={() =>
+                  setFilter(
+                    filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
+                  )
+                }
+              />
+              <Chip
+                label="Never cooked"
+                active={filter.type === 'never_cooked'}
+                colors={colors}
+                onPress={() =>
+                  setFilter(
+                    filter.type === 'never_cooked'
+                      ? { type: 'none' }
+                      : { type: 'never_cooked' }
+                  )
+                }
+              />
               <Chip
                 label="Want to cook"
                 active={filter.type === 'want_to_cook'}

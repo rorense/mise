@@ -14,13 +14,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import DraggableFlatList, {
+import {
+  NestableScrollContainer,
+  NestableDraggableFlatList,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 
@@ -130,7 +131,7 @@ export default function RecipeFormScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
-      <ScrollView
+      <NestableScrollContainer
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 14, paddingBottom: 48 }}
       >
@@ -348,7 +349,7 @@ export default function RecipeFormScreen() {
         </Text>
       ) : null}
       {showSteps ? (
-      <DraggableFlatList
+      <NestableDraggableFlatList
         data={recipe.steps}
         keyExtractor={(item) => item.id}
         scrollEnabled={false}
@@ -458,7 +459,7 @@ export default function RecipeFormScreen() {
         >
           <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save</Text>
         </Pressable>
-      </ScrollView>
+      </NestableScrollContainer>
       <AppDialog
         visible={dialog !== null}
         title={dialog?.title ?? ''}
