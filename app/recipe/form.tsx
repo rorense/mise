@@ -3,13 +3,14 @@ import {
   getRecipeById,
   saveRecipe,
 } from '@/data/recipes';
+import { AppDialog } from '@/components/AppDialog';
+import { BackButton } from '@/components/BackButton';
 import { newId } from '@/lib/id';
 import type { Ingredient, Recipe, Step } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   Switch,
@@ -23,6 +24,11 @@ export default function RecipeFormScreen() {
   const router = useRouter();
   const { recipeId } = useLocalSearchParams<{ recipeId?: string }>();
   const [recipe, setRecipe] = useState<Omit<Recipe, 'cookLogs'> | null>(null);
+  const [dialog, setDialog] = useState<{
+    title: string;
+    message: string;
+    onOk?: () => void;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,8 +37,11 @@ export default function RecipeFormScreen() {
         const r = await getRecipeById(String(recipeId));
         if (cancelled) return;
         if (!r) {
-          Alert.alert('Not found');
-          router.back();
+          setDialog({
+            title: 'Not found',
+            message: 'This recipe could not be loaded.',
+            onOk: () => router.back(),
+          });
           return;
         }
         const { cookLogs: _c, ...rest } = r;
@@ -73,10 +82,12 @@ export default function RecipeFormScreen() {
   };
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 20, gap: 14, paddingBottom: 48 }}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BackButton />
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 14, paddingBottom: 48 }}
+      >
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
         {recipeId ? 'Edit recipe' : 'New recipe'}
       </Text>
@@ -243,25 +254,42 @@ export default function RecipeFormScreen() {
         </View>
       ))}
 
-      <Pressable
-        onPress={async () => {
-          if (!recipe.title.trim()) {
-            Alert.alert('Title required');
-            return;
-          }
-          await saveRecipe(recipe);
-          router.replace(`/recipe/${recipe.id}`);
-        }}
-        style={{
-          backgroundColor: colors.primary,
-          padding: 16,
-          borderRadius: 14,
-          alignItems: 'center',
-        }}
-      >
-        <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save</Text>
-      </Pressable>
-    </ScrollView>
+        <Pressable
+          onPress={async () => {
+            if (!recipe.title.trim()) {
+              setDialog({
+                title: 'Title required',
+                message: 'Please enter a recipe title before saving.',
+              });
+              return;
+            }
+            await saveRecipe(recipe);
+            router.replace(`/recipe/${recipe.id}`);
+          }}
+          style={{
+            backgroundColor: colors.primary,
+            padding: 16,
+            borderRadius: 14,
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save</Text>
+        </Pressable>
+      </ScrollView>
+      <AppDialog
+        visible={dialog !== null}
+        title={dialog?.title ?? ''}
+        message={dialog?.message ?? ''}
+        actions={[
+          {
+            label: 'OK',
+            variant: 'primary',
+            onPress: () => dialog?.onOk?.(),
+          },
+        ]}
+        onClose={() => setDialog(null)}
+      />
+    </View>
   );
 }
 

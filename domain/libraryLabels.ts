@@ -20,5 +20,7 @@ export function formatFilterLabel(filter: LibraryFilter): string {
   if (filter.type === 'cuisine') return `Cuisine: ${filter.cuisine}`;
   if (filter.type === 'recently_cooked') return 'Cooked';
   if (filter.type === 'never_cooked') return 'Never cooked';
+  if (filter.type === 'favorite') return 'Favorites';
+  if (filter.type === 'want_to_cook') return 'Want to cook';
   return 'All';
 }

@@ -9,7 +9,8 @@ import { getDatabase } from '@/db/client';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from '@/theme/ThemeContext';
@@ -36,6 +37,39 @@ function ThemedStack() {
   );
 }
 
+function InitialLoadingScreen() {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: '#FAF8F5',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 34,
+          color: '#1A1A1A',
+          marginBottom: 14,
+        }}
+      >
+        Mise
+      </Text>
+      <ActivityIndicator size="small" color="#C4622D" />
+      <Text
+        style={{
+          marginTop: 10,
+          color: '#6B6B6B',
+          fontSize: 13,
+        }}
+      >
+        Preparing your kitchen...
+      </Text>
+    </View>
+  );
+}
+
 export default function RootLayout() {
   const [loaded] = useFonts({
     Lora_400Regular,
@@ -44,9 +78,21 @@ export default function RootLayout() {
     DMSans_500Medium,
     DMSans_700Bold,
   });
+  const [dbReady, setDbReady] = useState(false);
+  const [bootDelayDone, setBootDelayDone] = useState(false);
 
   useEffect(() => {
-    getDatabase().catch(() => undefined);
+    let cancelled = false;
+    getDatabase()
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setDbReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -55,17 +101,26 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
-  if (!loaded) {
-    return null;
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setBootDelayDone(true);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const appReady = loaded && dbReady && bootDelayDone;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <BottomSheetModalProvider>
-          <ThemedStack />
-        </BottomSheetModalProvider>
-      </ThemeProvider>
+      {appReady ? (
+        <ThemeProvider>
+          <BottomSheetModalProvider>
+            <ThemedStack />
+          </BottomSheetModalProvider>
+        </ThemeProvider>
+      ) : (
+        <InitialLoadingScreen />
+      )}
     </GestureHandlerRootView>
   );
 }

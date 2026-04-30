@@ -123,6 +123,8 @@ export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
     sourceUrl: '',
     sourceType: 'manual',
     baseServings,
+    isFavorite: false,
+    wantToCook: true,
     cuisine,
     ingredients,
     steps,

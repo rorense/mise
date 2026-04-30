@@ -1,14 +1,17 @@
 import { deleteCookLog, getCookLogById } from '@/data/recipes';
+import { BackButton } from '@/components/BackButton';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useTheme } from '@/theme/ThemeContext';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 
 export default function CookLogScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const router = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof getCookLogById>>>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -27,11 +30,13 @@ export default function CookLogScreen() {
   const { log, recipeTitle } = data;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
-      {log.photoUri ? (
-        <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
-      ) : null}
-      <View style={{ padding: 20, gap: 12 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BackButton />
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
+        {log.photoUri ? (
+          <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
+        ) : null}
+        <View style={{ padding: 20, paddingTop: 72, gap: 12 }}>
         <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>{recipeTitle}</Text>
         <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
           {new Date(log.cookedAt).toLocaleString()}
@@ -44,24 +49,26 @@ export default function CookLogScreen() {
           <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>No notes</Text>
         )}
         <Pressable
-          onPress={() =>
-            Alert.alert('Delete this cook entry?', 'The photo will be removed from the app.', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  await deleteCookLog(log.id);
-                  router.back();
-                },
-              },
-            ])
-          }
+          onPress={() => setShowDeleteConfirm(true)}
           style={{ marginTop: 16 }}
         >
           <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>Delete entry</Text>
         </Pressable>
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title="Delete this cook entry?"
+        message="The photo will be removed from the app."
+        confirmLabel="Delete"
+        destructive
+        onCancel={() => setShowDeleteConfirm(false)}
+        onConfirm={async () => {
+          setShowDeleteConfirm(false);
+          await deleteCookLog(log.id);
+          router.back();
+        }}
+      />
+    </View>
   );
 }

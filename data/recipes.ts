@@ -17,6 +17,8 @@ type RecipeRow = {
   source_url: string;
   source_type: SourceType;
   base_servings: number;
+  is_favorite: number;
+  want_to_cook: number;
   cuisine: string | null;
   created_at: string;
   updated_at: string;
@@ -128,6 +130,8 @@ export async function getRecipeById(id: string): Promise<Recipe | null> {
     sourceUrl: r.source_url,
     sourceType: r.source_type,
     baseServings: r.base_servings,
+    isFavorite: r.is_favorite === 1,
+    wantToCook: r.want_to_cook === 1,
     cuisine: r.cuisine ?? undefined,
     ingredients: ingRows.map(mapIngredient),
     steps: stepRows.map(mapStep),
@@ -149,7 +153,9 @@ export type LibraryFilter =
   | { type: 'tag'; tag: string }
   | { type: 'cuisine'; cuisine: string }
   | { type: 'recently_cooked' }
-  | { type: 'never_cooked' };
+  | { type: 'never_cooked' }
+  | { type: 'favorite' }
+  | { type: 'want_to_cook' };
 
 export async function listRecipeCards(
   query: string,
@@ -165,6 +171,8 @@ export async function listRecipeCards(
       r.id,
       r.title,
       r.cuisine,
+      r.is_favorite,
+      r.want_to_cook,
       r.updated_at,
       (SELECT photo_uri FROM cook_logs cl WHERE cl.recipe_id = r.id AND cl.photo_uri IS NOT NULL ORDER BY cl.cooked_at DESC, cl.created_at DESC LIMIT 1) AS hero_uri,
       (SELECT COUNT(*) FROM cook_logs cl2 WHERE cl2.recipe_id = r.id) AS cook_count,
@@ -200,6 +208,10 @@ export async function listRecipeCards(
     sql += ` AND EXISTS (SELECT 1 FROM cook_logs c4 WHERE c4.recipe_id = r.id)`;
   } else if (filter.type === 'never_cooked') {
     sql += ` AND NOT EXISTS (SELECT 1 FROM cook_logs c5 WHERE c5.recipe_id = r.id)`;
+  } else if (filter.type === 'favorite') {
+    sql += ` AND r.is_favorite = 1`;
+  } else if (filter.type === 'want_to_cook') {
+    sql += ` AND r.want_to_cook = 1`;
   }
 
   if (sort === 'recent_added') {
@@ -216,6 +228,8 @@ export async function listRecipeCards(
     id: string;
     title: string;
     cuisine: string | null;
+    is_favorite: number;
+    want_to_cook: number;
     updated_at: string;
     hero_uri: string | null;
     cook_count: number;
@@ -231,6 +245,8 @@ export async function listRecipeCards(
       cuisine: row.cuisine ?? undefined,
       heroUri: row.hero_uri ?? undefined,
       cookCount: row.cook_count,
+      isFavorite: row.is_favorite === 1,
+      wantToCook: row.want_to_cook === 1,
       lastCookedAt: row.last_cooked_at ?? undefined,
       updatedAt: row.updated_at,
       tags,
@@ -284,13 +300,15 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
   await db.execAsync('BEGIN IMMEDIATE');
   try {
     await db.runAsync(
-      `INSERT INTO recipes (id, title, source_url, source_type, base_servings, cuisine, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO recipes (id, title, source_url, source_type, base_servings, is_favorite, want_to_cook, cuisine, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          source_url = excluded.source_url,
          source_type = excluded.source_type,
          base_servings = excluded.base_servings,
+         is_favorite = excluded.is_favorite,
+         want_to_cook = excluded.want_to_cook,
          cuisine = excluded.cuisine,
          updated_at = excluded.updated_at`,
       recipe.id,
@@ -298,6 +316,8 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
       recipe.sourceUrl,
       recipe.sourceType,
       recipe.baseServings,
+      recipe.isFavorite ? 1 : 0,
+      recipe.wantToCook ? 1 : 0,
       recipe.cuisine ?? null,
       recipe.createdAt,
       now
@@ -363,7 +383,7 @@ export async function addCookLog(entry: CookLog): Promise<void> {
     entry.createdAt
   );
   await db.runAsync(
-    'UPDATE recipes SET updated_at = ? WHERE id = ?',
+    'UPDATE recipes SET updated_at = ?, want_to_cook = 0 WHERE id = ?',
     new Date().toISOString(),
     entry.recipeId
   );
@@ -398,6 +418,33 @@ export async function deleteCookLog(id: string): Promise<void> {
 export async function deleteRecipe(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM recipes WHERE id = ?', id);
+}
+
+export async function setRecipeFlags(
+  recipeId: string,
+  flags: { isFavorite?: boolean; wantToCook?: boolean }
+): Promise<void> {
+  const db = await getDatabase();
+  const current = await db.getFirstAsync<{
+    is_favorite: number;
+    want_to_cook: number;
+  }>('SELECT is_favorite, want_to_cook FROM recipes WHERE id = ?', recipeId);
+  if (!current) return;
+
+  const nextFavorite =
+    flags.isFavorite === undefined ? current.is_favorite : flags.isFavorite ? 1 : 0;
+  const nextWant =
+    flags.wantToCook === undefined ? current.want_to_cook : flags.wantToCook ? 1 : 0;
+
+  await db.runAsync(
+    `UPDATE recipes
+     SET is_favorite = ?, want_to_cook = ?, updated_at = ?
+     WHERE id = ?`,
+    nextFavorite,
+    nextWant,
+    new Date().toISOString(),
+    recipeId
+  );
 }
 
 export async function getCookLogById(
@@ -443,6 +490,8 @@ export async function createManualRecipeDraft(): Promise<Omit<Recipe, 'cookLogs'
     sourceUrl: '',
     sourceType: 'manual',
     baseServings: 4,
+    isFavorite: false,
+    wantToCook: true,
     ingredients: [],
     steps: [],
     tags: [],

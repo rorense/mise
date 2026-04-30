@@ -7,12 +7,14 @@ import {
   type RecipeListItem,
 } from '@/data/recipes';
 import { formatFilterLabel, formatSortLabel } from '@/domain/libraryLabels';
+import { getOnboarded } from '@/lib/secrets';
 import { useTheme } from '@/theme/ThemeContext';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Modal,
@@ -38,6 +40,23 @@ export default function LibraryScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [cuisines, setCuisines] = useState<string[]>([]);
   const [sortMenu, setSortMenu] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const done = await getOnboarded();
+      if (cancelled) return;
+      if (!done) {
+        router.replace('/onboarding');
+        return;
+      }
+      setOnboardingChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const reload = useCallback(async () => {
     const [t, c, rows] = await Promise.all([
@@ -121,6 +140,46 @@ export default function LibraryScreen() {
               {item.title || 'Untitled'}
             </Text>
           </View>
+          {(item.isFavorite || item.wantToCook) && (
+            <View
+              style={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+                flexDirection: 'row',
+                gap: 6,
+              }}
+            >
+              {item.isFavorite ? (
+                <View
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    backgroundColor: '#00000066',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="star" size={13} color="#FFD166" />
+                </View>
+              ) : null}
+              {item.wantToCook ? (
+                <View
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 12,
+                    backgroundColor: '#00000066',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="flame" size={13} color="#FF9F1C" />
+                </View>
+              ) : null}
+            </View>
+          )}
         </View>
 
         <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
@@ -139,9 +198,24 @@ export default function LibraryScreen() {
     </Pressable>
   );
 
+  if (!onboardingChecked) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
-      <View style={{ paddingHorizontal: 18, paddingBottom: 8 }}>
+      <View style={{ paddingHorizontal: 18, paddingBottom: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
           <Text
             style={{
@@ -203,7 +277,14 @@ export default function LibraryScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 8, gap: 8 }}
+        style={{ maxHeight: 36, minHeight: 36 }}
+        contentContainerStyle={{
+          paddingHorizontal: 14,
+          paddingBottom: 0,
+          paddingTop: 0,
+          gap: 8,
+          alignItems: 'center',
+        }}
       >
         <Chip
           label={formatSortLabel(sort)}
@@ -211,7 +292,14 @@ export default function LibraryScreen() {
           colors={colors}
           onPress={() => setSortMenu(true)}
         />
-        <Chip label={filterLabel} active={filter.type !== 'none'} colors={colors} onPress={() => setFilter({ type: 'none' })} />
+        {filter.type !== 'none' ? (
+          <Chip
+            label={`Clear (${filterLabel})`}
+            active
+            colors={colors}
+            onPress={() => setFilter({ type: 'none' })}
+          />
+        ) : null}
         <Chip
           label="Cooked"
           active={filter.type === 'recently_cooked'}
@@ -233,6 +321,28 @@ export default function LibraryScreen() {
               filter.type === 'never_cooked'
                 ? { type: 'none' }
                 : { type: 'never_cooked' }
+            )
+          }
+        />
+        <Chip
+          label="Favorites"
+          active={filter.type === 'favorite'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
+            )
+          }
+        />
+        <Chip
+          label="Want to cook"
+          active={filter.type === 'want_to_cook'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'want_to_cook'
+                ? { type: 'none' }
+                : { type: 'want_to_cook' }
             )
           }
         />
@@ -266,39 +376,51 @@ export default function LibraryScreen() {
             }
           />
         ))}
-      </ScrollView>
-
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'flex-end',
-          paddingHorizontal: 18,
-          paddingBottom: 6,
-        }}
-      >
         <Pressable
           onPress={() => setGrid((g) => !g)}
           style={{
-            paddingHorizontal: 10,
-            paddingVertical: 6,
+            paddingHorizontal: 12,
+            paddingVertical: 5,
+            minHeight: 30,
             borderRadius: 999,
             backgroundColor: colors.surface,
             borderWidth: 1,
             borderColor: colors.border,
+            alignSelf: 'flex-start',
+            justifyContent: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
-          <Ionicons name={grid ? 'list' : 'grid'} size={18} color={colors.textPrimary} />
+          <Ionicons
+            name={grid ? 'grid' : 'list'}
+            size={14}
+            color={colors.textPrimary}
+          />
+          <Text
+            style={{
+              fontFamily: 'DMSans_500Medium',
+              fontSize: 13,
+              lineHeight: 16,
+              color: colors.textPrimary,
+            }}
+          >
+            {grid ? 'Grid' : 'List'}
+          </Text>
         </Pressable>
-      </View>
+      </ScrollView>
 
       <FlatList
         key={grid ? 'grid' : 'list'}
         data={items}
         numColumns={grid ? 2 : 1}
         keyExtractor={(it) => it.id}
+        style={{ marginTop: 4, flex: 1 }}
         columnWrapperStyle={grid ? { gap: 10, paddingHorizontal: 14 } : undefined}
         contentContainerStyle={{
           paddingHorizontal: grid ? 0 : 14,
+          paddingTop: 0,
           paddingBottom: insets.bottom + 100,
         }}
         ListEmptyComponent={

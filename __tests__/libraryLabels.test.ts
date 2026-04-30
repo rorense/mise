@@ -14,6 +14,8 @@ describe('formatFilterLabel', () => {
     expect(formatFilterLabel({ type: 'none' })).toBe('All');
     expect(formatFilterLabel({ type: 'recently_cooked' })).toBe('Cooked');
     expect(formatFilterLabel({ type: 'never_cooked' })).toBe('Never cooked');
+    expect(formatFilterLabel({ type: 'favorite' })).toBe('Favorites');
+    expect(formatFilterLabel({ type: 'want_to_cook' })).toBe('Want to cook');
     expect(formatFilterLabel({ type: 'tag', tag: 'dinner' })).toBe('Tag: dinner');
     expect(formatFilterLabel({ type: 'cuisine', cuisine: 'Italian' })).toBe(
       'Cuisine: Italian'

@@ -38,6 +38,8 @@ export interface Recipe {
   sourceUrl: string;
   sourceType: SourceType;
   baseServings: number;
+  isFavorite: boolean;
+  wantToCook: boolean;
   ingredients: Ingredient[];
   steps: Step[];
   tags: string[];
@@ -53,6 +55,8 @@ export interface RecipeListItem {
   cuisine?: string;
   heroUri?: string;
   cookCount: number;
+  isFavorite: boolean;
+  wantToCook: boolean;
   lastCookedAt?: string;
   updatedAt: string;
   tags: string[];

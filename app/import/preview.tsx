@@ -1,4 +1,6 @@
 import { saveRecipe } from '@/data/recipes';
+import { AppDialog } from '@/components/AppDialog';
+import { BackButton } from '@/components/BackButton';
 import { newId } from '@/lib/id';
 import { takeImportDraft } from '@/lib/importDraftStore';
 import type { Recipe } from '@/types/recipe';
@@ -6,7 +8,6 @@ import { useTheme } from '@/theme/ThemeContext';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -20,12 +21,12 @@ export default function ImportPreviewScreen() {
   const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(null);
   const [ingredientText, setIngredientText] = useState('');
   const [stepText, setStepText] = useState('');
+  const [showMissingPreviewDialog, setShowMissingPreviewDialog] = useState(false);
 
   useEffect(() => {
     const d = takeImportDraft();
     if (!d) {
-      Alert.alert('Nothing to preview', 'Go back and import again.');
-      router.back();
+      setShowMissingPreviewDialog(true);
       return;
     }
     setDraft(d);
@@ -83,10 +84,12 @@ export default function ImportPreviewScreen() {
   };
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 20, gap: 12, paddingBottom: 40 }}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BackButton />
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 12, paddingBottom: 40 }}
+      >
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
         Preview
       </Text>
@@ -166,30 +169,47 @@ export default function ImportPreviewScreen() {
           textAlignVertical: 'top',
         }}
       />
-      <Pressable
-        onPress={async () => {
-          const withIngredients = parseIngredientLines();
-          const withSteps = {
-            ...withIngredients,
-            steps: parseStepLines().steps,
-          };
-          setDraft(withSteps);
-          await saveRecipe(withSteps);
-          router.replace(`/recipe/${withSteps.id}`);
+        <Pressable
+          onPress={async () => {
+            const withIngredients = parseIngredientLines();
+            const withSteps = {
+              ...withIngredients,
+              steps: parseStepLines().steps,
+            };
+            setDraft(withSteps);
+            await saveRecipe(withSteps);
+            router.replace(`/recipe/${withSteps.id}`);
+          }}
+          style={{
+            backgroundColor: colors.primary,
+            padding: 16,
+            borderRadius: 14,
+            alignItems: 'center',
+            marginTop: 8,
+          }}
+        >
+          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+            Save to library
+          </Text>
+        </Pressable>
+      </ScrollView>
+      <AppDialog
+        visible={showMissingPreviewDialog}
+        title="Nothing to preview"
+        message="Go back and import again."
+        actions={[
+          {
+            label: 'OK',
+            variant: 'primary',
+            onPress: () => router.back(),
+          },
+        ]}
+        onClose={() => {
+          setShowMissingPreviewDialog(false);
+          router.back();
         }}
-        style={{
-          backgroundColor: colors.primary,
-          padding: 16,
-          borderRadius: 14,
-          alignItems: 'center',
-          marginTop: 8,
-        }}
-      >
-        <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-          Save to library
-        </Text>
-      </Pressable>
-    </ScrollView>
+      />
+    </View>
   );
 }
 

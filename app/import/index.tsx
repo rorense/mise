@@ -1,4 +1,6 @@
+import { AppDialog, type AppDialogAction } from '@/components/AppDialog';
 import { getOpenAiApiKey, getYoutubeApiKey } from '@/lib/secrets';
+import { BackButton } from '@/components/BackButton';
 import { importFromInstagramCaption, importFromUrl } from '@/lib/import/pipeline';
 import { setImportDraft } from '@/lib/importDraftStore';
 import { useTheme } from '@/theme/ThemeContext';
@@ -7,7 +9,6 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -23,6 +24,11 @@ export default function ImportScreen() {
   const [instagramCaption, setInstagramCaption] = useState('');
   const [tab, setTab] = useState<'url' | 'instagram'>('url');
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<{
+    title: string;
+    message: string;
+    actions: AppDialogAction[];
+  } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,23 +42,39 @@ export default function ImportScreen() {
   const runUrlImport = async () => {
     const trimmedUrl = url.trim();
     if (!trimmedUrl) {
-      Alert.alert('Missing URL', 'Paste a recipe or YouTube link first.');
+      setDialog({
+        title: 'Missing URL',
+        message: 'Paste a recipe or YouTube link first.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     try {
       new URL(trimmedUrl);
     } catch {
-      Alert.alert('Invalid URL', 'Please enter a full URL including https://');
+      setDialog({
+        title: 'Invalid URL',
+        message: 'Please enter a full URL including https://',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     const state = await NetInfo.fetch();
     if (!state.isConnected) {
-      Alert.alert('Offline', 'Connect to Wi‑Fi to import recipes.');
+      setDialog({
+        title: 'Offline',
+        message: 'Connect to Wi-Fi to import recipes.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     const key = await getOpenAiApiKey();
     if (!key) {
-      Alert.alert('API key', 'Add an OpenAI API key in Settings.');
+      setDialog({
+        title: 'API key',
+        message: 'Add an OpenAI API key in Settings.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     const yt = await getYoutubeApiKey();
@@ -62,17 +84,18 @@ export default function ImportScreen() {
       setImportDraft(draft);
       router.push('/import/preview');
     } catch (e) {
-      Alert.alert(
-        'Import failed',
-        e instanceof Error ? e.message : 'Unknown error',
-        [
-          { text: 'OK' },
+      setDialog({
+        title: 'Import failed',
+        message: e instanceof Error ? e.message : 'Unknown error',
+        actions: [
+          { label: 'OK' },
           {
-            text: 'Manual entry',
+            label: 'Manual entry',
+            variant: 'primary',
             onPress: () => router.replace('/recipe/form'),
           },
-        ]
-      );
+        ],
+      });
     } finally {
       setBusy(false);
     }
@@ -81,17 +104,29 @@ export default function ImportScreen() {
   const runInstagramImport = async () => {
     const trimmedCaption = instagramCaption.trim();
     if (!trimmedCaption) {
-      Alert.alert('Missing caption', 'Paste the Instagram caption before extracting.');
+      setDialog({
+        title: 'Missing caption',
+        message: 'Paste the Instagram caption before extracting.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     const state = await NetInfo.fetch();
     if (!state.isConnected) {
-      Alert.alert('Offline', 'Connect to Wi‑Fi to import recipes.');
+      setDialog({
+        title: 'Offline',
+        message: 'Connect to Wi-Fi to import recipes.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     const key = await getOpenAiApiKey();
     if (!key) {
-      Alert.alert('API key', 'Add an OpenAI API key in Settings.');
+      setDialog({
+        title: 'API key',
+        message: 'Add an OpenAI API key in Settings.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
       return;
     }
     setBusy(true);
@@ -100,27 +135,30 @@ export default function ImportScreen() {
       setImportDraft(draft);
       router.push('/import/preview');
     } catch (e) {
-      Alert.alert(
-        'Import failed',
-        e instanceof Error ? e.message : 'Unknown error',
-        [
-          { text: 'OK' },
+      setDialog({
+        title: 'Import failed',
+        message: e instanceof Error ? e.message : 'Unknown error',
+        actions: [
+          { label: 'OK' },
           {
-            text: 'Manual entry',
+            label: 'Manual entry',
+            variant: 'primary',
             onPress: () => router.replace('/recipe/form'),
           },
-        ]
-      );
+        ],
+      });
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 20, gap: 16 }}>
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Import
-      </Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BackButton />
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 16 }}>
+        <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
+          Import
+        </Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Pressable
           onPress={() => setTab('url')}
@@ -229,9 +267,17 @@ export default function ImportScreen() {
         </>
       )}
 
-      <Pressable onPress={() => router.replace('/recipe/form')}>
-        <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Enter manually instead</Text>
-      </Pressable>
-    </ScrollView>
+        <Pressable onPress={() => router.replace('/recipe/form')}>
+          <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Enter manually instead</Text>
+        </Pressable>
+      </ScrollView>
+      <AppDialog
+        visible={dialog !== null}
+        title={dialog?.title ?? ''}
+        message={dialog?.message ?? ''}
+        actions={dialog?.actions ?? []}
+        onClose={() => setDialog(null)}
+      />
+    </View>
   );
 }

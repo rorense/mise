@@ -1,4 +1,6 @@
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
+import { AppDialog } from '@/components/AppDialog';
+import { BackButton } from '@/components/BackButton';
 import {
   deleteOpenAiApiKey,
   getOpenAiApiKey,
@@ -8,10 +10,9 @@ import {
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -21,10 +22,13 @@ import {
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
-  const router = useRouter();
   const [openai, setOpenai] = useState('');
   const [youtube, setYoutube] = useState('');
   const [storage, setStorage] = useState('—');
+  const [dialog, setDialog] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     const [oa, yt, bytes] = await Promise.all([
@@ -50,13 +54,15 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 48 }}
-    >
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Keys
-      </Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <BackButton />
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 20, paddingBottom: 48 }}
+      >
+        <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
+          Keys
+        </Text>
       <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
         Stored in SecureStore. Never logged.
       </Text>
@@ -87,7 +93,7 @@ export default function SettingsScreen() {
         <Pressable
           onPress={async () => {
             await setOpenAiApiKey(openai.trim());
-            Alert.alert('Saved', 'OpenAI key updated.');
+            setDialog({ title: 'Saved', message: 'OpenAI key updated.' });
           }}
           style={{
             marginTop: 10,
@@ -136,7 +142,7 @@ export default function SettingsScreen() {
         <Pressable
           onPress={async () => {
             await setYoutubeApiKey(youtube.trim());
-            Alert.alert('Saved', 'YouTube key updated.');
+            setDialog({ title: 'Saved', message: 'YouTube key updated.' });
           }}
           style={{
             marginTop: 10,
@@ -185,12 +191,24 @@ export default function SettingsScreen() {
         Approximate document storage: {storage}
       </Text>
 
-      <Pressable onPress={() => Alert.alert('Mise', 'Personal recipe journal — local only.')}>
+      <Pressable
+        onPress={() =>
+          setDialog({
+            title: 'Mise',
+            message: 'Personal recipe journal — local only.',
+          })
+        }
+      >
         <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>About</Text>
       </Pressable>
-      <Pressable onPress={() => router.back()}>
-        <Text style={{ color: colors.textSecondary }}>Close</Text>
-      </Pressable>
-    </ScrollView>
+      </ScrollView>
+      <AppDialog
+        visible={dialog !== null}
+        title={dialog?.title ?? ''}
+        message={dialog?.message ?? ''}
+        actions={[{ label: 'OK', variant: 'primary' }]}
+        onClose={() => setDialog(null)}
+      />
+    </View>
   );
 }
