@@ -1,4 +1,8 @@
-import { scaleForIngredient, scaleQuantity } from '@/domain/scaling';
+import {
+  formatQuantity,
+  scaleForIngredient,
+  scaleQuantity,
+} from '@/domain/scaling';
 import type { Ingredient } from '@/types/recipe';
 
 describe('scaleQuantity', () => {
@@ -30,5 +34,15 @@ describe('scaleForIngredient', () => {
       sortOrder: 0,
     };
     expect(scaleForIngredient(ing, 4, 1)).toBe(1);
+  });
+});
+
+describe('formatQuantity', () => {
+  it('uses numeric output in compact mode', () => {
+    expect(formatQuantity(0.2, 'tsp', 'compact')).toBe('0.2 tsp');
+  });
+
+  it('uses friendly output in friendly mode', () => {
+    expect(formatQuantity(0.2, 'tsp', 'friendly')).toBe('a pinch');
   });
 });

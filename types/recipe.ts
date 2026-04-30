@@ -29,6 +29,7 @@ export interface CookLog {
   cookedAt: string;
   photoUri?: string;
   notes?: string;
+  rating?: number;
   createdAt: string;
 }
 
@@ -37,9 +38,11 @@ export interface Recipe {
   title: string;
   sourceUrl: string;
   sourceType: SourceType;
+  mainImageUri?: string;
   baseServings: number;
   isFavorite: boolean;
   wantToCook: boolean;
+  isArchived: boolean;
   ingredients: Ingredient[];
   steps: Step[];
   tags: string[];
@@ -54,9 +57,11 @@ export interface RecipeListItem {
   title: string;
   cuisine?: string;
   heroUri?: string;
+  mainImageUri?: string;
   cookCount: number;
   isFavorite: boolean;
   wantToCook: boolean;
+  isArchived: boolean;
   lastCookedAt?: string;
   updatedAt: string;
   tags: string[];

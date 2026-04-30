@@ -1,4 +1,5 @@
 import {
+  bulkEditRecipeTags,
   getAllCuisines,
   getAllTags,
   listRecipeCards,
@@ -41,6 +42,11 @@ export default function LibraryScreen() {
   const [cuisines, setCuisines] = useState<string[]>([]);
   const [sortMenu, setSortMenu] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
+  const [bulkTagEditorOpen, setBulkTagEditorOpen] = useState(false);
+  const [bulkAddTags, setBulkAddTags] = useState('');
+  const [bulkRemoveTags, setBulkRemoveTags] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +85,17 @@ export default function LibraryScreen() {
 
   const renderCard = ({ item }: { item: RecipeListItem }) => (
     <Pressable
-      onPress={() => router.push(`/recipe/${item.id}`)}
+      onPress={() => {
+        if (bulkMode) {
+          setSelectedRecipeIds((prev) =>
+            prev.includes(item.id)
+              ? prev.filter((id) => id !== item.id)
+              : [...prev, item.id]
+          );
+          return;
+        }
+        router.push(`/recipe/${item.id}`);
+      }}
       style={({ pressed }) => ({
         flex: grid ? 0.5 : 1,
         marginBottom: 14,
@@ -180,6 +196,27 @@ export default function LibraryScreen() {
               ) : null}
             </View>
           )}
+          {bulkMode ? (
+            <View
+              style={{
+                position: 'absolute',
+                left: 8,
+                top: 8,
+                width: 22,
+                height: 22,
+                borderRadius: 11,
+                borderWidth: 1,
+                borderColor: '#fff',
+                backgroundColor: selectedRecipeIds.includes(item.id) ? colors.primary : '#00000066',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {selectedRecipeIds.includes(item.id) ? (
+                <Ionicons name="checkmark" size={14} color="#fff" />
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
@@ -346,6 +383,16 @@ export default function LibraryScreen() {
             )
           }
         />
+        <Chip
+          label="Archived"
+          active={filter.type === 'archived'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
+            )
+          }
+        />
         {tags.slice(0, 10).map((t) => (
           <Chip
             key={t}
@@ -409,6 +456,72 @@ export default function LibraryScreen() {
             {grid ? 'Grid' : 'List'}
           </Text>
         </Pressable>
+        <Pressable
+          onPress={() => {
+            if (bulkMode) {
+              setBulkTagEditorOpen(true);
+              return;
+            }
+            setSelectedRecipeIds([]);
+            setBulkMode(true);
+          }}
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 5,
+            minHeight: 30,
+            borderRadius: 999,
+            backgroundColor: bulkMode ? colors.primary + '22' : colors.surface,
+            borderWidth: 1,
+            borderColor: bulkMode ? colors.primary : colors.border,
+            alignSelf: 'flex-start',
+            justifyContent: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <Ionicons name="pricetags-outline" size={14} color={bulkMode ? colors.primary : colors.textPrimary} />
+          <Text
+            style={{
+              fontFamily: 'DMSans_500Medium',
+              fontSize: 13,
+              lineHeight: 16,
+              color: bulkMode ? colors.primary : colors.textPrimary,
+            }}
+          >
+            {bulkMode ? `Edit tags (${selectedRecipeIds.length})` : 'Bulk tags'}
+          </Text>
+        </Pressable>
+        {bulkMode ? (
+          <Pressable
+            onPress={() => {
+              setBulkMode(false);
+              setSelectedRecipeIds([]);
+            }}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              minHeight: 30,
+              borderRadius: 999,
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignSelf: 'flex-start',
+              justifyContent: 'center',
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: 'DMSans_500Medium',
+                fontSize: 13,
+                lineHeight: 16,
+                color: colors.textPrimary,
+              }}
+            >
+              Cancel
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <FlatList
@@ -504,6 +617,97 @@ export default function LibraryScreen() {
               </Pressable>
             ))}
           </View>
+        </Pressable>
+      </Modal>
+      <Modal visible={bulkTagEditorOpen} transparent animationType="fade">
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: '#0006',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+          onPress={() => setBulkTagEditorOpen(false)}
+        >
+          <Pressable
+            onPress={() => undefined}
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: 14,
+              gap: 10,
+            }}
+          >
+            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 20 }}>
+              Bulk tag edit
+            </Text>
+            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
+              Selected recipes: {selectedRecipeIds.length}
+            </Text>
+            <TextInput
+              value={bulkAddTags}
+              onChangeText={setBulkAddTags}
+              placeholder="Add tags (comma separated)"
+              placeholderTextColor={colors.textSecondary}
+              style={{
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                color: colors.textPrimary,
+                fontFamily: 'DMSans_400Regular',
+                backgroundColor: colors.background,
+              }}
+            />
+            <TextInput
+              value={bulkRemoveTags}
+              onChangeText={setBulkRemoveTags}
+              placeholder="Remove tags (comma separated)"
+              placeholderTextColor={colors.textSecondary}
+              style={{
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                color: colors.textPrimary,
+                fontFamily: 'DMSans_400Regular',
+                backgroundColor: colors.background,
+              }}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+              <Pressable onPress={() => setBulkTagEditorOpen(false)} style={{ padding: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Close</Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  if (selectedRecipeIds.length === 0) return;
+                  await bulkEditRecipeTags({
+                    recipeIds: selectedRecipeIds,
+                    addTags: bulkAddTags.split(','),
+                    removeTags: bulkRemoveTags.split(','),
+                  });
+                  setBulkTagEditorOpen(false);
+                  setBulkAddTags('');
+                  setBulkRemoveTags('');
+                  setBulkMode(false);
+                  setSelectedRecipeIds([]);
+                  await reload();
+                }}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor: colors.primary,
+                }}
+              >
+                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Apply</Text>
+              </Pressable>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>

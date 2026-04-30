@@ -1,15 +1,22 @@
+import { exportBackupJson, restoreBackupJson } from '@/data/backup';
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
 import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import {
   deleteOpenAiApiKey,
+  getAppearance,
+  getUnitsDisplayPreference,
   getOpenAiApiKey,
   getYoutubeApiKey,
+  setUnitsDisplayPreference,
   setOpenAiApiKey,
   setYoutubeApiKey,
+  type UnitsDisplayPreference,
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -25,6 +32,9 @@ export default function SettingsScreen() {
   const [openai, setOpenai] = useState('');
   const [youtube, setYoutube] = useState('');
   const [storage, setStorage] = useState('—');
+  const [unitsDisplay, setUnitsDisplay] =
+    useState<UnitsDisplayPreference>('compact');
+  const [backupDraft, setBackupDraft] = useState('');
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -36,9 +46,11 @@ export default function SettingsScreen() {
       getYoutubeApiKey(),
       estimateAppStorageBytes(),
     ]);
+    const units = await getUnitsDisplayPreference();
     setOpenai(oa ?? '');
     setYoutube(yt ?? '');
     setStorage(formatBytes(bytes));
+    setUnitsDisplay(units);
   }, []);
 
   useFocusEffect(
@@ -183,6 +195,32 @@ export default function SettingsScreen() {
           </Pressable>
         ))}
       </View>
+      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
+        Units display
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {(['compact', 'friendly'] as UnitsDisplayPreference[]).map((value) => (
+          <Pressable
+            key={value}
+            onPress={async () => {
+              setUnitsDisplay(value);
+              await setUnitsDisplayPreference(value);
+            }}
+            style={{
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 999,
+              backgroundColor: unitsDisplay === value ? colors.primary + '33' : colors.surface,
+              borderWidth: 1,
+              borderColor: unitsDisplay === value ? colors.primary : colors.border,
+            }}
+          >
+            <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
+              {value === 'compact' ? 'Numeric' : 'Friendly'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
         Storage
@@ -190,6 +228,85 @@ export default function SettingsScreen() {
       <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
         Approximate document storage: {storage}
       </Text>
+      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
+        Data backup
+      </Text>
+      <Pressable
+        onPress={async () => {
+          const json = await exportBackupJson();
+          const backupPath = `${FileSystem.documentDirectory}mise-backup-${Date.now()}.json`;
+          await FileSystem.writeAsStringAsync(backupPath, json);
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(backupPath);
+          }
+          setDialog({
+            title: 'Backup ready',
+            message: 'Backup file generated and ready to share.',
+          });
+        }}
+        style={{
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 12,
+          padding: 12,
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
+          Export backup
+        </Text>
+      </Pressable>
+      <TextInput
+        value={backupDraft}
+        onChangeText={setBackupDraft}
+        placeholder="Paste backup JSON to restore"
+        placeholderTextColor={colors.textSecondary}
+        multiline
+        style={{
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 12,
+          padding: 12,
+          minHeight: 110,
+          textAlignVertical: 'top',
+          fontFamily: 'DMSans_400Regular',
+          color: colors.textPrimary,
+          backgroundColor: colors.surface,
+        }}
+      />
+      <Pressable
+        onPress={async () => {
+          try {
+            await restoreBackupJson(backupDraft);
+            const restoredAppearance = await getAppearance();
+            if (restoredAppearance) {
+              setMode(restoredAppearance);
+            }
+            setBackupDraft('');
+            await load();
+            setDialog({
+              title: 'Restore complete',
+              message: 'Backup data has been restored.',
+            });
+          } catch {
+            setDialog({
+              title: 'Restore failed',
+              message: 'Invalid backup JSON or incompatible backup file.',
+            });
+          }
+        }}
+        style={{
+          backgroundColor: colors.primary,
+          borderRadius: 12,
+          padding: 12,
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+          Restore backup
+        </Text>
+      </Pressable>
 
       <Pressable
         onPress={() =>

@@ -4,22 +4,28 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeChatSheet';
 import {
   addCookLog,
-  deleteRecipe,
   getRecipeById,
+  setRecipeArchived,
   setRecipeFlags,
+  setRecipeMainImage,
 } from '@/data/recipes';
 import type { Recipe } from '@/types/recipe';
 import {
   formatQuantity,
   renderStepInstruction,
   scaleForIngredient,
+  type UnitsDisplayMode,
 } from '@/domain/scaling';
+import { resolveRecipeHeroImage } from '@/domain/recipeImages';
 import {
   normalizeServings,
   shouldCommitSliderTick,
 } from '@/domain/slider';
-import { getOpenAiApiKey } from '@/lib/secrets';
-import { compressAndSaveCookPhoto } from '@/lib/media';
+import { getOpenAiApiKey, getUnitsDisplayPreference } from '@/lib/secrets';
+import {
+  compressAndSaveCookPhoto,
+  compressAndSaveMainRecipePhoto,
+} from '@/lib/media';
 import { newId } from '@/lib/id';
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,7 +56,9 @@ export default function RecipeDetailScreen() {
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [servings, setServings] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
-  const [showDeleteRecipeConfirm, setShowDeleteRecipeConfirm] = useState(false);
+  const [ratingDraft, setRatingDraft] = useState<number | null>(null);
+  const [showArchiveRecipeConfirm, setShowArchiveRecipeConfirm] = useState(false);
+  const [unitsMode, setUnitsMode] = useState<UnitsDisplayMode>('compact');
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -59,7 +67,11 @@ export default function RecipeDetailScreen() {
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
-    const r = await getRecipeById(String(id));
+    const [r, unitsPreference] = await Promise.all([
+      getRecipeById(String(id)),
+      getUnitsDisplayPreference(),
+    ]);
+    setUnitsMode(unitsPreference);
     if (r) {
       const initialServings = normalizeServings(r.baseServings);
       setServings(initialServings);
@@ -84,7 +96,10 @@ export default function RecipeDetailScreen() {
     );
   }
 
-  const hero = recipe.cookLogs.find((l) => l.photoUri)?.photoUri;
+  const hero = resolveRecipeHeroImage(
+    recipe.mainImageUri,
+    recipe.cookLogs.find((l) => l.photoUri)?.photoUri
+  );
 
   const shareRecipe = async () => {
     const lines = [
@@ -92,12 +107,20 @@ export default function RecipeDetailScreen() {
       '',
       ...recipe.ingredients.map((i) => {
         const q = scaleForIngredient(i, recipe.baseServings, servings);
-        return `- ${formatQuantity(q, i.unit)} ${i.name}`;
+        return `- ${formatQuantity(q, i.unit, unitsMode)} ${i.name}`;
       }),
       '',
       ...recipe.steps
         .sort((a, b) => a.order - b.order)
-        .map((s, idx) => `${idx + 1}. ${renderStepInstruction(s, recipe.baseServings, servings)}`),
+        .map(
+          (s, idx) =>
+            `${idx + 1}. ${renderStepInstruction(
+              s,
+              recipe.baseServings,
+              servings,
+              unitsMode
+            )}`
+        ),
     ];
     await Share.share({ message: lines.join('\n') });
   };
@@ -109,9 +132,11 @@ export default function RecipeDetailScreen() {
       cookedAt: new Date().toISOString(),
       photoUri,
       notes: noteDraft.trim() || undefined,
+      rating: ratingDraft ?? undefined,
       createdAt: new Date().toISOString(),
     });
     setNoteDraft('');
+    setRatingDraft(null);
     reload();
   };
 
@@ -170,6 +195,46 @@ export default function RecipeDetailScreen() {
     });
   };
 
+  const setMainImageFromLibrary = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setDialog({
+        title: 'Permission',
+        message: 'Photos permission is required.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
+      return;
+    }
+    const pick = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+    if (pick.canceled || !pick.assets?.[0]) return;
+    const saved = await compressAndSaveMainRecipePhoto(pick.assets[0].uri, newId());
+    await setRecipeMainImage(recipe.id, saved);
+    await reload();
+  };
+
+  const setMainImageFromCamera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setDialog({
+        title: 'Permission',
+        message: 'Camera permission is required.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
+      return;
+    }
+    const snap = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+    });
+    if (snap.canceled || !snap.assets?.[0]) return;
+    const saved = await compressAndSaveMainRecipePhoto(snap.assets[0].uri, newId());
+    await setRecipeMainImage(recipe.id, saved);
+    await reload();
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
@@ -182,6 +247,44 @@ export default function RecipeDetailScreen() {
               <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
             </View>
           )}
+          <Pressable
+            onPress={() =>
+              setDialog({
+                title: 'Main image',
+                message: 'Choose how to set the recipe main image.',
+                actions: [
+                  { label: 'Cancel' },
+                  {
+                    label: 'Clear',
+                    onPress: async () => {
+                      await setRecipeMainImage(recipe.id, undefined);
+                      await reload();
+                    },
+                  },
+                  {
+                    label: 'Photo library',
+                    onPress: () => setMainImageFromLibrary(),
+                  },
+                  { label: 'Camera', onPress: () => setMainImageFromCamera() },
+                ],
+              })
+            }
+            style={{
+              position: 'absolute',
+              right: 10,
+              bottom: 10,
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#0000007a',
+              borderWidth: 1,
+              borderColor: '#ffffff80',
+            }}
+          >
+            <Ionicons name="camera-outline" size={17} color="#fff" />
+          </Pressable>
         </View>
         <View style={{ padding: 20, gap: 12 }}>
           <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 26, color: colors.textPrimary }}>
@@ -307,7 +410,7 @@ export default function RecipeDetailScreen() {
             const q = scaleForIngredient(ing, recipe.baseServings, servings);
             return (
               <Text key={ing.id} style={{ fontFamily: 'DMSans_400Regular', color: colors.textPrimary }}>
-                · {formatQuantity(q, ing.unit)} {ing.name}
+                · {formatQuantity(q, ing.unit, unitsMode)} {ing.name}
                 {!ing.scalable ? '  ⚠ adjust to taste' : ''}
               </Text>
             );
@@ -332,7 +435,7 @@ export default function RecipeDetailScreen() {
                   <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>{idx + 1}</Text>
                 </View>
                 <Text style={{ flex: 1, fontFamily: 'DMSans_400Regular', color: colors.textPrimary, lineHeight: 22 }}>
-                  {renderStepInstruction(s, recipe.baseServings, servings)}
+                  {renderStepInstruction(s, recipe.baseServings, servings, unitsMode)}
                 </Text>
               </View>
             ))}
@@ -357,11 +460,27 @@ export default function RecipeDetailScreen() {
                   )}
                   <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
                     {new Date(log.cookedAt).toLocaleDateString()}
+                    {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
                   </Text>
                 </View>
               </Pressable>
             ))}
           </ScrollView>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Cook rating</Text>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <Pressable
+                key={value}
+                onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
+              >
+                <Ionicons
+                  name={ratingDraft !== null && value <= ratingDraft ? 'star' : 'star-outline'}
+                  size={18}
+                  color={ratingDraft !== null && value <= ratingDraft ? '#FFD166' : colors.textSecondary}
+                />
+              </Pressable>
+            ))}
+          </View>
           <TextInput
             placeholder="Notes for this cook (optional)"
             placeholderTextColor={colors.textSecondary}
@@ -395,8 +514,10 @@ export default function RecipeDetailScreen() {
             <Pressable onPress={shareRecipe}>
               <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Share</Text>
             </Pressable>
-            <Pressable onPress={() => setShowDeleteRecipeConfirm(true)}>
-              <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>Delete</Text>
+            <Pressable onPress={() => setShowArchiveRecipeConfirm(true)}>
+              <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
+                {recipe.isArchived ? 'Unarchive' : 'Archive'}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -445,15 +566,19 @@ export default function RecipeDetailScreen() {
         </>
       ) : null}
       <ConfirmDialog
-        visible={showDeleteRecipeConfirm}
-        title="Delete recipe?"
-        message="This cannot be undone."
-        confirmLabel="Delete"
-        destructive
-        onCancel={() => setShowDeleteRecipeConfirm(false)}
+        visible={showArchiveRecipeConfirm}
+        title={recipe.isArchived ? 'Unarchive recipe?' : 'Archive recipe?'}
+        message={
+          recipe.isArchived
+            ? 'This recipe will return to your active library.'
+            : 'Archived recipes are hidden from your active library.'
+        }
+        confirmLabel={recipe.isArchived ? 'Unarchive' : 'Archive'}
+        destructive={!recipe.isArchived}
+        onCancel={() => setShowArchiveRecipeConfirm(false)}
         onConfirm={async () => {
-          setShowDeleteRecipeConfirm(false);
-          await deleteRecipe(recipe.id);
+          setShowArchiveRecipeConfirm(false);
+          await setRecipeArchived(recipe.id, !recipe.isArchived);
           router.replace('/');
         }}
       />

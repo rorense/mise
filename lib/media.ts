@@ -6,8 +6,22 @@ function cookDir(): string {
   return `${base}cook-photos`;
 }
 
+function recipeDir(): string {
+  const base = FileSystem.documentDirectory ?? '';
+  return `${base}recipe-photos`;
+}
+
 export async function ensureCookPhotoDir(): Promise<string> {
   const dir = cookDir();
+  const info = await FileSystem.getInfoAsync(dir);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  }
+  return dir;
+}
+
+export async function ensureRecipePhotoDir(): Promise<string> {
+  const dir = recipeDir();
   const info = await FileSystem.getInfoAsync(dir);
   if (!info.exists) {
     await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
@@ -20,6 +34,21 @@ export async function compressAndSaveCookPhoto(
   destFileName: string
 ): Promise<string> {
   const dir = await ensureCookPhotoDir();
+  const manipulated = await ImageManipulator.manipulateAsync(
+    sourceUri,
+    [{ resize: { width: 1200 } }],
+    { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+  );
+  const dest = `${dir}/${destFileName}.jpg`;
+  await FileSystem.copyAsync({ from: manipulated.uri, to: dest });
+  return dest;
+}
+
+export async function compressAndSaveMainRecipePhoto(
+  sourceUri: string,
+  destFileName: string
+): Promise<string> {
+  const dir = await ensureRecipePhotoDir();
   const manipulated = await ImageManipulator.manipulateAsync(
     sourceUri,
     [{ resize: { width: 1200 } }],

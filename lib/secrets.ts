@@ -1,10 +1,12 @@
 import type { AppearanceMode } from '@/theme/colors';
 import * as SecureStore from 'expo-secure-store';
+export type UnitsDisplayPreference = 'compact' | 'friendly';
 
 const KEY_OPENAI = 'mise_openai_api_key';
 const KEY_YOUTUBE = 'mise_youtube_api_key';
 const KEY_APPEARANCE = 'mise_appearance';
 const KEY_ONBOARDED = 'mise_onboarded';
+const KEY_UNITS_DISPLAY = 'mise_units_display';
 
 export async function getOpenAiApiKey(): Promise<string | null> {
   return SecureStore.getItemAsync(KEY_OPENAI);
@@ -43,4 +45,15 @@ export async function getOnboarded(): Promise<boolean> {
 
 export async function setOnboarded(done: boolean): Promise<void> {
   await SecureStore.setItemAsync(KEY_ONBOARDED, done ? '1' : '0');
+}
+
+export async function getUnitsDisplayPreference(): Promise<UnitsDisplayPreference> {
+  const value = await SecureStore.getItemAsync(KEY_UNITS_DISPLAY);
+  return value === 'friendly' ? 'friendly' : 'compact';
+}
+
+export async function setUnitsDisplayPreference(
+  preference: UnitsDisplayPreference
+): Promise<void> {
+  await SecureStore.setItemAsync(KEY_UNITS_DISPLAY, preference);
 }

@@ -63,6 +63,14 @@ const MIGRATIONS: Record<number, string> = {
     CREATE INDEX IF NOT EXISTS idx_recipes_favorite ON recipes(is_favorite);
     CREATE INDEX IF NOT EXISTS idx_recipes_want_to_cook ON recipes(want_to_cook);
   `,
+  3: `
+    ALTER TABLE recipes ADD COLUMN main_image_uri TEXT;
+  `,
+  4: `
+    ALTER TABLE recipes ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cook_logs ADD COLUMN rating INTEGER;
+    CREATE INDEX IF NOT EXISTS idx_recipes_archived ON recipes(is_archived);
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {

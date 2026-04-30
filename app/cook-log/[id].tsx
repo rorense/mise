@@ -41,6 +41,11 @@ export default function CookLogScreen() {
         <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
           {new Date(log.cookedAt).toLocaleString()}
         </Text>
+        {typeof log.rating === 'number' ? (
+          <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
+            Rating: {log.rating}/5
+          </Text>
+        ) : null}
         {log.notes ? (
           <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 16, lineHeight: 24, color: colors.textPrimary }}>
             {log.notes}

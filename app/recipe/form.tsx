@@ -117,6 +117,14 @@ export default function RecipeFormScreen() {
         colors={colors}
       />
       <LabeledInput
+        label="Main image URI (optional)"
+        value={recipe.mainImageUri ?? ''}
+        onChange={(t) =>
+          setRecipe({ ...recipe, mainImageUri: t.trim() ? t.trim() : undefined })
+        }
+        colors={colors}
+      />
+      <LabeledInput
         label="Tags (comma separated)"
         value={recipe.tags.join(', ')}
         onChange={(t) =>

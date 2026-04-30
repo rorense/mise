@@ -1,5 +1,7 @@
 import type { Ingredient, Step } from '@/types/recipe';
 
+export type UnitsDisplayMode = 'compact' | 'friendly';
+
 const COUNTABLE_UNITS = new Set(
   [
     '',
@@ -63,8 +65,12 @@ export function friendlySmallAmount(
   return null;
 }
 
-export function formatQuantity(quantity: number, unit: string | null): string {
-  const friendly = friendlySmallAmount(quantity, unit);
+export function formatQuantity(
+  quantity: number,
+  unit: string | null,
+  mode: UnitsDisplayMode = 'compact'
+): string {
+  const friendly = mode === 'friendly' ? friendlySmallAmount(quantity, unit) : null;
   if (friendly) return friendly;
   const rounded = Number.isInteger(quantity) ? String(quantity) : String(quantity);
   return unit ? `${rounded} ${unit}` : rounded;
@@ -73,14 +79,15 @@ export function formatQuantity(quantity: number, unit: string | null): string {
 export function renderStepInstruction(
   step: Step,
   baseServings: number,
-  currentServings: number
+  currentServings: number,
+  mode: UnitsDisplayMode = 'compact'
 ): string {
   let text = step.instruction;
   for (const sq of step.scalableQuantities) {
     const scaled =
       Math.round(scaleQuantity(sq.baseQuantity, baseServings, currentServings) * 10) /
       10;
-    const replacement = formatQuantity(scaled, sq.unit || null);
+    const replacement = formatQuantity(scaled, sq.unit || null, mode);
     text = text.split(sq.placeholder).join(replacement);
   }
   return text;
@@ -89,12 +96,13 @@ export function renderStepInstruction(
 export function buildChatIngredientLines(
   ingredients: Ingredient[],
   baseServings: number,
-  currentServings: number
+  currentServings: number,
+  mode: UnitsDisplayMode = 'compact'
 ): string {
   return ingredients
     .map((i) => {
       const q = scaleForIngredient(i, baseServings, currentServings);
-      const qty = formatQuantity(q, i.unit);
+      const qty = formatQuantity(q, i.unit, mode);
       const notes = i.notes ? ` (${i.notes})` : '';
       const hint = !i.scalable ? ' [adjust to taste]' : '';
       return `- ${qty} ${i.name}${notes}${hint}`;
