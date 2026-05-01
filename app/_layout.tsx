@@ -5,44 +5,66 @@ import {
 } from '@expo-google-fonts/dm-sans';
 import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import {
+  DarkTheme as NavigationDarkTheme,
+  DefaultTheme as NavigationDefaultTheme,
+  ThemeProvider as NavigationThemeProvider,
+} from '@react-navigation/native';
 import { getDatabase } from '@/db/client';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
-import { ThemeProvider, useTheme } from '@/theme/ThemeContext';
+import { ThemeProvider as AppThemeProvider, useTheme } from '@/theme/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
 
 function ThemedStack() {
   const { resolved, colors } = useTheme();
+  const navigationTheme = useMemo(
+    () => ({
+      ...(resolved === 'dark' ? NavigationDarkTheme : NavigationDefaultTheme),
+      colors: {
+        ...(resolved === 'dark' ? NavigationDarkTheme.colors : NavigationDefaultTheme.colors),
+        primary: colors.primary,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.textPrimary,
+        border: colors.border,
+      },
+    }),
+    [resolved, colors]
+  );
+
   return (
     <>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          headerStyle: { backgroundColor: colors.surface },
-          headerTintColor: colors.textPrimary,
-          headerTitleStyle: { fontFamily: 'Lora_700Bold' },
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      >
-        <Stack.Screen name="index" />
-      </Stack>
+      <NavigationThemeProvider value={navigationTheme}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            headerStyle: { backgroundColor: colors.surface },
+            headerTintColor: colors.textPrimary,
+            headerTitleStyle: { fontFamily: 'Lora_700Bold' },
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="index" />
+        </Stack>
+      </NavigationThemeProvider>
     </>
   );
 }
 
-function InitialLoadingScreen() {
+function InitialLoadingScreen({ dark }: { dark: boolean }) {
   return (
     <View
       style={{
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: dark ? '#0B0B0B' : '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
       }}
@@ -54,7 +76,7 @@ function InitialLoadingScreen() {
       <Text
         style={{
           fontSize: 34,
-          color: '#1A1A1A',
+          color: dark ? '#F2F2F2' : '#1A1A1A',
           marginBottom: 12,
         }}
       >
@@ -64,7 +86,7 @@ function InitialLoadingScreen() {
       <Text
         style={{
           marginTop: 10,
-          color: '#6B6B6B',
+          color: dark ? '#B3B3B3' : '#6B6B6B',
           fontSize: 13,
         }}
       >
@@ -75,6 +97,7 @@ function InitialLoadingScreen() {
 }
 
 export default function RootLayout() {
+  const system = useColorScheme();
   const [loaded] = useFonts({
     Lora_400Regular,
     Lora_700Bold,
@@ -113,17 +136,20 @@ export default function RootLayout() {
   }, []);
 
   const appReady = loaded && dbReady && bootDelayDone;
+  const bootDark = system === 'dark';
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView
+      style={{ flex: 1, backgroundColor: bootDark ? '#0B0B0B' : '#FFFFFF' }}
+    >
       {appReady ? (
-        <ThemeProvider>
+        <AppThemeProvider>
           <BottomSheetModalProvider>
             <ThemedStack />
           </BottomSheetModalProvider>
-        </ThemeProvider>
+        </AppThemeProvider>
       ) : (
-        <InitialLoadingScreen />
+        <InitialLoadingScreen dark={bootDark} />
       )}
     </GestureHandlerRootView>
   );

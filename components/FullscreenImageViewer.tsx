@@ -1,6 +1,8 @@
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import { Image, Modal, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type FullscreenImageViewerProps = {
   imageUri: string | null;
@@ -9,20 +11,25 @@ type FullscreenImageViewerProps = {
 
 export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageViewerProps) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
       visible={!!imageUri}
       transparent
       animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      presentationStyle="overFullScreen"
       onRequestClose={onClose}
     >
       <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <StatusBar hidden={!!imageUri} />
         <Pressable
           onPress={onClose}
           style={{
             position: 'absolute',
-            top: 46,
+            top: insets.top + 12,
             right: 18,
             zIndex: 2,
             width: 38,

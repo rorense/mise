@@ -1,5 +1,4 @@
 import {
-  bulkEditRecipeTags,
   getAllCuisines,
   getAllTags,
   listRecipeCards,
@@ -7,7 +6,6 @@ import {
   type LibrarySort,
   type RecipeListItem,
 } from '@/data/recipes';
-import { formatSortLabel } from '@/domain/libraryLabels';
 import { getOnboarded } from '@/lib/secrets';
 import { useTheme } from '@/theme/ThemeContext';
 import type { ThemeColors } from '@/theme/colors';
@@ -43,11 +41,6 @@ export default function LibraryScreen() {
   const [sortMenu, setSortMenu] = useState(false);
   const [filterMenu, setFilterMenu] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
-  const [bulkTagEditorOpen, setBulkTagEditorOpen] = useState(false);
-  const [bulkAddTags, setBulkAddTags] = useState('');
-  const [bulkRemoveTags, setBulkRemoveTags] = useState('');
   const reloadSeqRef = useRef(0);
 
   useEffect(() => {
@@ -87,17 +80,7 @@ export default function LibraryScreen() {
 
   const renderCard = ({ item }: { item: RecipeListItem }) => (
     <Pressable
-      onPress={() => {
-        if (bulkMode) {
-          setSelectedRecipeIds((prev) =>
-            prev.includes(item.id)
-              ? prev.filter((id) => id !== item.id)
-              : [...prev, item.id]
-          );
-          return;
-        }
-        router.push(`/recipe/${item.id}`);
-      }}
+      onPress={() => router.push(`/recipe/${item.id}`)}
       style={({ pressed }) => ({
         flex: grid ? 0.5 : 1,
         marginBottom: 14,
@@ -198,27 +181,6 @@ export default function LibraryScreen() {
               ) : null}
             </View>
           )}
-          {bulkMode ? (
-            <View
-              style={{
-                position: 'absolute',
-                left: 8,
-                top: 8,
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                borderWidth: 1,
-                borderColor: '#fff',
-                backgroundColor: selectedRecipeIds.includes(item.id) ? colors.primary : '#00000066',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {selectedRecipeIds.includes(item.id) ? (
-                <Ionicons name="checkmark" size={14} color="#fff" />
-              ) : null}
-            </View>
-          ) : null}
         </View>
 
         <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
@@ -269,6 +231,40 @@ export default function LibraryScreen() {
           >
             Mise
           </Text>
+          <Pressable
+            onPress={() => setSortMenu(true)}
+            hitSlop={8}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              marginRight: 8,
+            }}
+          >
+            <Ionicons name="swap-vertical-outline" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <Pressable
+            onPress={() => setGrid((g) => !g)}
+            hitSlop={8}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              marginRight: 8,
+            }}
+          >
+            <Ionicons name={grid ? 'grid' : 'list'} size={18} color={colors.textPrimary} />
+          </Pressable>
           <Link href="/settings" asChild>
             <Pressable
               hitSlop={8}
@@ -329,12 +325,6 @@ export default function LibraryScreen() {
         }}
       >
         <Chip
-          label={formatSortLabel(sort)}
-          active
-          colors={colors}
-          onPress={() => setSortMenu(true)}
-        />
-        <Chip
           label="Cooked"
           active={filter.type === 'recently_cooked'}
           colors={colors}
@@ -346,116 +336,56 @@ export default function LibraryScreen() {
             )
           }
         />
-        <Pressable
-          onPress={() => setGrid((g) => !g)}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 5,
-            minHeight: 30,
-            borderRadius: 999,
-            backgroundColor: colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-            alignSelf: 'flex-start',
-            justifyContent: 'center',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <Ionicons
-            name={grid ? 'grid' : 'list'}
-            size={14}
-            color={colors.textPrimary}
-          />
-          <Text
-            style={{
-              fontFamily: 'DMSans_500Medium',
-              fontSize: 13,
-              lineHeight: 16,
-              color: colors.textPrimary,
-            }}
-          >
-            {grid ? 'Grid' : 'List'}
-          </Text>
-        </Pressable>
+        <Chip
+          label="Favorites"
+          active={filter.type === 'favorite'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
+            )
+          }
+        />
+        <Chip
+          label="Want to cook"
+          active={filter.type === 'want_to_cook'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'want_to_cook'
+                ? { type: 'none' }
+                : { type: 'want_to_cook' }
+            )
+          }
+        />
+        <Chip
+          label="Never cooked"
+          active={filter.type === 'never_cooked'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'never_cooked'
+                ? { type: 'none' }
+                : { type: 'never_cooked' }
+            )
+          }
+        />
+        <Chip
+          label="Archived"
+          active={filter.type === 'archived'}
+          colors={colors}
+          onPress={() =>
+            setFilter(
+              filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
+            )
+          }
+        />
         <Chip
           label="More"
-          active={
-            filter.type === 'want_to_cook' ||
-            filter.type === 'archived' ||
-            filter.type === 'tag' ||
-            filter.type === 'cuisine'
-          }
+          active={filter.type === 'tag' || filter.type === 'cuisine'}
           colors={colors}
           onPress={() => setFilterMenu(true)}
         />
-        <Pressable
-          onPress={() => {
-            if (bulkMode) {
-              setBulkTagEditorOpen(true);
-              return;
-            }
-            setSelectedRecipeIds([]);
-            setBulkMode(true);
-          }}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 5,
-            minHeight: 30,
-            borderRadius: 999,
-            backgroundColor: bulkMode ? colors.primary + '22' : colors.surface,
-            borderWidth: 1,
-            borderColor: bulkMode ? colors.primary : colors.border,
-            alignSelf: 'flex-start',
-            justifyContent: 'center',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <Ionicons name="pricetags-outline" size={14} color={bulkMode ? colors.primary : colors.textPrimary} />
-          <Text
-            style={{
-              fontFamily: 'DMSans_500Medium',
-              fontSize: 13,
-              lineHeight: 16,
-              color: bulkMode ? colors.primary : colors.textPrimary,
-            }}
-          >
-            {bulkMode ? `Edit tags (${selectedRecipeIds.length})` : 'Bulk tags'}
-          </Text>
-        </Pressable>
-        {bulkMode ? (
-          <Pressable
-            onPress={() => {
-              setBulkMode(false);
-              setSelectedRecipeIds([]);
-            }}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              minHeight: 30,
-              borderRadius: 999,
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-              alignSelf: 'flex-start',
-              justifyContent: 'center',
-            }}
-          >
-            <Text
-              style={{
-                fontFamily: 'DMSans_500Medium',
-                fontSize: 13,
-                lineHeight: 16,
-                color: colors.textPrimary,
-              }}
-            >
-              Cancel
-            </Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
 
       <FlatList
@@ -578,99 +508,6 @@ export default function LibraryScreen() {
               </Pressable>
             ))}
           </View>
-        </Pressable>
-      </Modal>
-      <Modal visible={bulkTagEditorOpen} transparent animationType="fade">
-        <Pressable
-          style={{
-            flex: 1,
-            backgroundColor: '#0006',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-          onPress={() => setBulkTagEditorOpen(false)}
-        >
-          <Pressable
-            onPress={() => undefined}
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: 12,
-              gap: 8,
-            }}
-          >
-            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 18 }}>
-              Bulk tag edit
-            </Text>
-            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary, fontSize: 13 }}>
-              Selected recipes: {selectedRecipeIds.length}
-            </Text>
-            <TextInput
-              value={bulkAddTags}
-              onChangeText={setBulkAddTags}
-              placeholder="Add tags (comma separated)"
-              placeholderTextColor={colors.textSecondary}
-              style={{
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                paddingHorizontal: 12,
-                paddingVertical: 9,
-                color: colors.textPrimary,
-                fontFamily: 'DMSans_400Regular',
-                fontSize: 14,
-                backgroundColor: colors.background,
-              }}
-            />
-            <TextInput
-              value={bulkRemoveTags}
-              onChangeText={setBulkRemoveTags}
-              placeholder="Remove tags (comma separated)"
-              placeholderTextColor={colors.textSecondary}
-              style={{
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                paddingHorizontal: 12,
-                paddingVertical: 9,
-                color: colors.textPrimary,
-                fontFamily: 'DMSans_400Regular',
-                fontSize: 14,
-                backgroundColor: colors.background,
-              }}
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
-              <Pressable onPress={() => setBulkTagEditorOpen(false)} style={{ padding: 8 }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Close</Text>
-              </Pressable>
-              <Pressable
-                onPress={async () => {
-                  if (selectedRecipeIds.length === 0) return;
-                  await bulkEditRecipeTags({
-                    recipeIds: selectedRecipeIds,
-                    addTags: bulkAddTags.split(','),
-                    removeTags: bulkRemoveTags.split(','),
-                  });
-                  setBulkTagEditorOpen(false);
-                  setBulkAddTags('');
-                  setBulkRemoveTags('');
-                  setBulkMode(false);
-                  setSelectedRecipeIds([]);
-                  await reload();
-                }}
-                style={{
-                  paddingHorizontal: 13,
-                  paddingVertical: 8,
-                  borderRadius: 10,
-                  backgroundColor: colors.primary,
-                }}
-              >
-                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Apply</Text>
-              </Pressable>
-            </View>
-          </Pressable>
         </Pressable>
       </Modal>
       <Modal visible={filterMenu} transparent animationType="fade">
