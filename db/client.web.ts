@@ -1,6 +1,4 @@
-type UnsupportedWebDatabase = {
-  readonly __unsupported: 'sqlite-web-not-configured';
-};
+import type * as SQLite from 'expo-sqlite';
 
 function unsupportedError(): Error {
   return new Error(
@@ -8,7 +6,7 @@ function unsupportedError(): Error {
   );
 }
 
-export function getDatabase(): Promise<UnsupportedWebDatabase> {
+export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   return Promise.reject(unsupportedError());
 }
 
