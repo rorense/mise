@@ -5,14 +5,18 @@ import {
 } from '@/data/recipes';
 import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
+import { getActiveAiProvider, getBundledAiKey } from '@/lib/aiConfig';
+import { importFromManualText } from '@/lib/import/pipeline';
 import { newId } from '@/lib/id';
 import { getSeenStepDragHint, setSeenStepDragHint } from '@/lib/secrets';
 import type { Ingredient, Recipe, Step } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   Switch,
   Text,
@@ -24,6 +28,22 @@ import {
   NestableDraggableFlatList,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
+
+function mergeAiExtractIntoDraft(
+  current: Omit<Recipe, 'cookLogs'>,
+  extracted: Omit<Recipe, 'cookLogs'>
+): Omit<Recipe, 'cookLogs'> {
+  return {
+    ...current,
+    title: extracted.title,
+    baseServings: extracted.baseServings,
+    cuisine: extracted.cuisine,
+    tags: extracted.tags,
+    ingredients: extracted.ingredients,
+    steps: extracted.steps,
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export default function RecipeFormScreen() {
   const { colors } = useTheme();
@@ -41,6 +61,9 @@ export default function RecipeFormScreen() {
   const [activeIngredientId, setActiveIngredientId] = useState<string | null>(null);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
   const [showStepDragHint, setShowStepDragHint] = useState(false);
+  const [showPasteAi, setShowPasteAi] = useState(false);
+  const [rawPasteText, setRawPasteText] = useState('');
+  const [parseBusy, setParseBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +225,114 @@ export default function RecipeFormScreen() {
         }
         colors={colors}
       />
+
+      <Pressable
+        onPress={() => setShowPasteAi((v) => !v)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+      >
+        <Ionicons
+          name={showPasteAi ? 'chevron-down' : 'chevron-forward'}
+          size={16}
+          color={colors.textSecondary}
+        />
+        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
+          Paste raw recipe (AI)
+        </Text>
+      </Pressable>
+      {showPasteAi ? (
+        <>
+          <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
+            Paste ingredients and instructions in one block; we will split them into ingredients and steps.
+          </Text>
+          <TextInput
+            multiline
+            value={rawPasteText}
+            onChangeText={setRawPasteText}
+            placeholder="Paste anything: blog text, notes, a caption…"
+            placeholderTextColor={colors.textSecondary}
+            style={{
+              minHeight: 140,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 12,
+              padding: 12,
+              textAlignVertical: 'top',
+              fontFamily: 'DMSans_400Regular',
+              color: colors.textPrimary,
+              backgroundColor: colors.surface,
+            }}
+          />
+          <Pressable
+            disabled={parseBusy}
+            onPress={async () => {
+              const text = rawPasteText.trim();
+              if (!text) {
+                setDialog({
+                  title: 'Nothing to parse',
+                  message: 'Paste some recipe text first.',
+                });
+                return;
+              }
+              const state = await NetInfo.fetch();
+              if (!state.isConnected) {
+                setDialog({
+                  title: 'Offline',
+                  message: 'Connect to Wi-Fi to use AI parsing.',
+                });
+                return;
+              }
+              const provider = await getActiveAiProvider();
+              const key = getBundledAiKey(provider);
+              if (!key) {
+                setDialog({
+                  title: 'API key',
+                  message: `Missing ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in local env.`,
+                });
+                return;
+              }
+              setParseBusy(true);
+              try {
+                const extracted = await importFromManualText(
+                  text,
+                  provider,
+                  key,
+                  'manual'
+                );
+                setRecipe((r) =>
+                  r ? mergeAiExtractIntoDraft(r, extracted) : r
+                );
+                setRawPasteText('');
+                setShowIngredients(true);
+                setShowSteps(true);
+                setActiveIngredientId(null);
+                setActiveStepId(null);
+              } catch (e) {
+                setDialog({
+                  title: 'Parse failed',
+                  message: e instanceof Error ? e.message : 'Unknown error',
+                });
+              } finally {
+                setParseBusy(false);
+              }
+            }}
+            style={{
+              backgroundColor: colors.primary,
+              padding: 16,
+              borderRadius: 14,
+              alignItems: 'center',
+              opacity: parseBusy ? 0.6 : 1,
+            }}
+          >
+            {parseBusy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+                Parse with AI
+              </Text>
+            )}
+          </Pressable>
+        </>
+      ) : null}
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Pressable
