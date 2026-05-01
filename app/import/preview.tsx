@@ -6,7 +6,7 @@ import { takeImportDraft } from '@/lib/importDraftStore';
 import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -18,28 +18,37 @@ import {
 export default function ImportPreviewScreen() {
   const { colors } = useTheme();
   const router = useRouter();
-  const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(null);
-  const [ingredientText, setIngredientText] = useState('');
-  const [stepText, setStepText] = useState('');
-  const [showMissingPreviewDialog, setShowMissingPreviewDialog] = useState(false);
-
-  useEffect(() => {
-    const d = takeImportDraft();
-    if (!d) {
-      setShowMissingPreviewDialog(true);
-      return;
-    }
-    setDraft(d);
-    setIngredientText(
-      d.ingredients
-        .map((i) => `${i.quantity}|${i.unit ?? ''}|${i.name}|${i.scalable ? 'y' : 'n'}|${i.notes ?? ''}`)
-        .join('\n')
-    );
-    setStepText(d.steps.map((s) => s.instruction).join('\n'));
-  }, [router]);
+  const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(() => takeImportDraft());
+  const [ingredientText, setIngredientText] = useState(() =>
+    (draft?.ingredients ?? [])
+      .map((i) => `${i.quantity}|${i.unit ?? ''}|${i.name}|${i.scalable ? 'y' : 'n'}|${i.notes ?? ''}`)
+      .join('\n')
+  );
+  const [stepText, setStepText] = useState(() =>
+    (draft?.steps ?? []).map((s) => s.instruction).join('\n')
+  );
 
   if (!draft) {
-    return null;
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <BackButton />
+        <AppDialog
+          visible
+          title="Nothing to preview"
+          message="Go back and import again."
+          actions={[
+            {
+              label: 'OK',
+              variant: 'primary',
+              onPress: () => router.back(),
+            },
+          ]}
+          onClose={() => {
+            router.back();
+          }}
+        />
+      </View>
+    );
   }
 
   const parseIngredientLines = () => {
@@ -193,22 +202,6 @@ export default function ImportPreviewScreen() {
           </Text>
         </Pressable>
       </ScrollView>
-      <AppDialog
-        visible={showMissingPreviewDialog}
-        title="Nothing to preview"
-        message="Go back and import again."
-        actions={[
-          {
-            label: 'OK',
-            variant: 'primary',
-            onPress: () => router.back(),
-          },
-        ]}
-        onClose={() => {
-          setShowMissingPreviewDialog(false);
-          router.back();
-        }}
-      />
     </View>
   );
 }

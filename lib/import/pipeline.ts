@@ -60,18 +60,6 @@ export async function importFromUrl(
   });
 }
 
-export async function importFromInstagramCaption(
-  caption: string,
-  provider: AiProvider,
-  apiKey: string
-): Promise<Omit<Recipe, 'cookLogs'>> {
-  return extractRecipeFromText(provider, apiKey, {
-    sourceType: 'instagram',
-    sourceUrl: '',
-    content: caption,
-  });
-}
-
 export async function importFromManualText(
   text: string,
   provider: AiProvider,

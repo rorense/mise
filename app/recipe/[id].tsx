@@ -39,7 +39,7 @@ import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Image,
   Linking,
@@ -122,13 +122,6 @@ export default function RecipeDetailScreen() {
       reload();
     }, [reload])
   );
-
-  useEffect(() => {
-    if (!recipe) return;
-    setCheckedIngredientIds((prev) =>
-      prev.filter((id) => recipe.ingredients.some((ingredient) => ingredient.id === id))
-    );
-  }, [recipe]);
 
   if (isLoading) {
     return (
@@ -754,6 +747,20 @@ export default function RecipeDetailScreen() {
                           {new Date(log.cookedAt).toLocaleDateString()}
                           {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
                         </Text>
+                        {log.notes ? (
+                          <Text
+                            style={{
+                              marginTop: 4,
+                              color: colors.textPrimary,
+                              fontFamily: 'DMSans_400Regular',
+                              fontSize: 12,
+                              lineHeight: 16,
+                            }}
+                            numberOfLines={3}
+                          >
+                            {log.notes}
+                          </Text>
+                        ) : null}
                       </View>
                     </Pressable>
                   ))}

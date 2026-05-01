@@ -3,7 +3,6 @@ import { getActiveAiProvider, getBundledAiKey } from '@/lib/aiConfig';
 import { getYoutubeApiKey } from '@/lib/secrets';
 import { BackButton } from '@/components/BackButton';
 import {
-  importFromInstagramCaption,
   importFromManualText,
   importFromUrl,
 } from '@/lib/import/pipeline';
@@ -26,9 +25,8 @@ export default function ImportScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [url, setUrl] = useState('');
-  const [instagramCaption, setInstagramCaption] = useState('');
   const [batchText, setBatchText] = useState('');
-  const [tab, setTab] = useState<'url' | 'instagram' | 'paste'>('url');
+  const [tab, setTab] = useState<'url' | 'paste'>('url');
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<{
     title: string;
@@ -116,47 +114,6 @@ export default function ImportScreen() {
     }
   };
 
-  const runInstagramImport = async () => {
-    const trimmedCaption = instagramCaption.trim();
-    if (!trimmedCaption) {
-      setDialog({
-        title: 'Missing caption',
-        message: 'Paste the Instagram caption before extracting.',
-        actions: [{ label: 'OK', variant: 'primary' }],
-      });
-      return;
-    }
-    const ai = await getAiConfig();
-    if (!ai) {
-      return;
-    }
-    setBusy(true);
-    try {
-      const draft = await importFromInstagramCaption(
-        trimmedCaption,
-        ai.provider,
-        ai.key
-      );
-      setImportDraft(draft);
-      router.push('/import/preview');
-    } catch (e) {
-      setDialog({
-        title: 'Import failed',
-        message: e instanceof Error ? e.message : 'Unknown error',
-        actions: [
-          { label: 'OK' },
-          {
-            label: 'Manual entry',
-            variant: 'primary',
-            onPress: () => router.replace('/recipe/form'),
-          },
-        ],
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const runBatchPasteImport = async () => {
     const trimmedText = batchText.trim();
     if (!trimmedText) {
@@ -221,19 +178,6 @@ export default function ImportScreen() {
           <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>URL / YouTube</Text>
         </Pressable>
         <Pressable
-          onPress={() => setTab('instagram')}
-          style={{
-            paddingHorizontal: 14,
-            paddingVertical: 10,
-            borderRadius: 999,
-            backgroundColor: tab === 'instagram' ? colors.primary + '22' : colors.surface,
-            borderWidth: 1,
-            borderColor: tab === 'instagram' ? colors.primary : colors.border,
-          }}
-        >
-          <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>Instagram</Text>
-        </Pressable>
-        <Pressable
           onPress={() => setTab('paste')}
           style={{
             paddingHorizontal: 14,
@@ -248,48 +192,7 @@ export default function ImportScreen() {
         </Pressable>
       </View>
 
-      {tab === 'instagram' ? (
-        <>
-          <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            Open the Reel, copy the caption, and paste it here.
-          </Text>
-          <TextInput
-            multiline
-            value={instagramCaption}
-            onChangeText={setInstagramCaption}
-            placeholder="Paste caption…"
-            placeholderTextColor={colors.textSecondary}
-            style={{
-              minHeight: 160,
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 12,
-              padding: 12,
-              textAlignVertical: 'top',
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textPrimary,
-              backgroundColor: colors.surface,
-            }}
-          />
-          <Pressable
-            disabled={busy}
-            onPress={runInstagramImport}
-            style={{
-              backgroundColor: colors.primary,
-              padding: 16,
-              borderRadius: 14,
-              alignItems: 'center',
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Extract recipe</Text>
-            )}
-          </Pressable>
-        </>
-      ) : tab === 'paste' ? (
+      {tab === 'paste' ? (
         <>
           <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
             Paste a full recipe block (notes, article text, caption, or copied page), and AI will split it into ingredients and steps.

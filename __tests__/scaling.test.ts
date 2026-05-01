@@ -1,5 +1,6 @@
 import {
   formatQuantity,
+  renderStepInstruction,
   scaleForIngredient,
   scaleQuantity,
 } from '@/domain/scaling';
@@ -44,5 +45,43 @@ describe('formatQuantity', () => {
 
   it('uses friendly output in friendly mode', () => {
     expect(formatQuantity(0.2, 'tsp', 'friendly')).toBe('a pinch');
+  });
+});
+
+describe('renderStepInstruction', () => {
+  it('does not duplicate units when instruction already includes unit text', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's1',
+          order: 0,
+          instruction: 'Add {{qty_1}} g sugar and mix.',
+          scalableQuantities: [
+            { placeholder: '{{qty_1}}', baseQuantity: 100, unit: 'g' },
+          ],
+        },
+        4,
+        2,
+        'compact'
+      )
+    ).toBe('Add 50 g sugar and mix.');
+  });
+
+  it('keeps unit in replacement when instruction has only placeholder', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's2',
+          order: 0,
+          instruction: 'Whisk in {{qty_1}}.',
+          scalableQuantities: [
+            { placeholder: '{{qty_1}}', baseQuantity: 30, unit: 'ml' },
+          ],
+        },
+        2,
+        4,
+        'compact'
+      )
+    ).toBe('Whisk in 60 ml.');
   });
 });

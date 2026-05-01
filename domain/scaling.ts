@@ -20,6 +20,52 @@ const COUNTABLE_UNITS = new Set(
 );
 
 const EGG_PATTERN = /egg/i;
+const UNIT_ALIASES: Record<string, string[]> = {
+  g: ['g', 'gram', 'grams'],
+  kg: ['kg', 'kilogram', 'kilograms'],
+  ml: ['ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'],
+  l: ['l', 'liter', 'liters', 'litre', 'litres'],
+  tsp: ['tsp', 'teaspoon', 'teaspoons'],
+  tbsp: ['tbsp', 'tbs', 'tablespoon', 'tablespoons'],
+  cup: ['cup', 'cups'],
+  x: ['x'],
+};
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatNumericQuantity(quantity: number): string {
+  if (Number.isInteger(quantity)) {
+    return String(quantity);
+  }
+  return String(Number(quantity.toFixed(2)));
+}
+
+function hasUnitAdjacentToPlaceholder(
+  instruction: string,
+  placeholder: string,
+  unit: string
+): boolean {
+  const normalizedUnit = unit.trim().toLowerCase();
+  if (!normalizedUnit) return false;
+  const aliases = UNIT_ALIASES[normalizedUnit] ?? [normalizedUnit];
+  const escapedPlaceholder = escapeRegExp(placeholder);
+  const separatorPattern = String.raw`[\s\-–—(){}\[\],.:;]*`;
+
+  return aliases.some((alias) => {
+    const token = escapeRegExp(alias);
+    const afterPattern = new RegExp(
+      `${escapedPlaceholder}${separatorPattern}${token}(?=$|\\s|[\\],.:;!?])`,
+      'i'
+    );
+    const beforePattern = new RegExp(
+      `(^|\\s|[\\[(,])${token}${separatorPattern}${escapedPlaceholder}`,
+      'i'
+    );
+    return afterPattern.test(instruction) || beforePattern.test(instruction);
+  });
+}
 
 export function scaleQuantity(
   baseQty: number,
@@ -72,7 +118,7 @@ export function formatQuantity(
 ): string {
   const friendly = mode === 'friendly' ? friendlySmallAmount(quantity, unit) : null;
   if (friendly) return friendly;
-  const rounded = Number.isInteger(quantity) ? String(quantity) : String(quantity);
+  const rounded = formatNumericQuantity(quantity);
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
@@ -87,7 +133,11 @@ export function renderStepInstruction(
     const scaled =
       Math.round(scaleQuantity(sq.baseQuantity, baseServings, currentServings) * 10) /
       10;
-    const replacement = formatQuantity(scaled, sq.unit || null, mode);
+    const hasAdjacentUnit =
+      !!sq.unit && hasUnitAdjacentToPlaceholder(text, sq.placeholder, sq.unit);
+    const replacement = hasAdjacentUnit
+      ? formatNumericQuantity(scaled)
+      : formatQuantity(scaled, sq.unit || null, mode);
     text = text.split(sq.placeholder).join(replacement);
   }
   return text;
