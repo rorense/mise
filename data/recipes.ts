@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '@/db/client';
 import { newId } from '@/lib/id';
 import type {
@@ -104,7 +104,7 @@ async function loadTagsForRecipe(
      JOIN tags t ON t.id = rt.tag_id
      WHERE rt.recipe_id = ?
      ORDER BY t.name COLLATE NOCASE`,
-    recipeId
+    [recipeId]
   );
   return rows.map((r) => r.name);
 }
@@ -113,20 +113,20 @@ export async function getRecipeById(id: string): Promise<Recipe | null> {
   const db = await getDatabase();
   const r = await db.getFirstAsync<RecipeRow>(
     'SELECT * FROM recipes WHERE id = ?',
-    id
+    [id]
   );
   if (!r) return null;
   const ingRows = await db.getAllAsync<IngredientRow>(
     'SELECT * FROM ingredients WHERE recipe_id = ? ORDER BY sort_order, id',
-    id
+    [id]
   );
   const stepRows = await db.getAllAsync<StepRow>(
     'SELECT * FROM steps WHERE recipe_id = ? ORDER BY order_idx, id',
-    id
+    [id]
   );
   const logs = await db.getAllAsync<CookLogRow>(
     'SELECT * FROM cook_logs WHERE recipe_id = ? ORDER BY cooked_at DESC, created_at DESC',
-    id
+    [id]
   );
   const tags = await loadTagsForRecipe(db, id);
   return {
@@ -260,7 +260,7 @@ export async function listRecipeCards(
     hero_uri: string | null;
     cook_count: number;
     last_cooked_at: string | null;
-  }>(sql, ...params);
+  }>(sql, params);
 
   const items: RecipeListItem[] = [];
   for (const row of rows) {
@@ -318,14 +318,14 @@ async function ensureTagIds(
     if (!name) continue;
     const existing = await db.getFirstAsync<{ id: string }>(
       'SELECT id FROM tags WHERE name = ? COLLATE NOCASE',
-      name
+      [name]
     );
     if (existing) {
       ids.push(existing.id);
       continue;
     }
     const id = newId();
-    await db.runAsync('INSERT INTO tags (id, name) VALUES (?, ?)', id, name);
+    await db.runAsync('INSERT INTO tags (id, name) VALUES (?, ?)', [id, name]);
     ids.push(id);
   }
   return ids;
@@ -350,36 +350,40 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
          is_archived = excluded.is_archived,
          cuisine = excluded.cuisine,
          updated_at = excluded.updated_at`,
-      recipe.id,
-      recipe.title,
-      recipe.sourceUrl,
-      recipe.sourceType,
-      recipe.mainImageUri ?? null,
-      recipe.baseServings,
-      recipe.isFavorite ? 1 : 0,
-      recipe.wantToCook ? 1 : 0,
-      recipe.isArchived ? 1 : 0,
-      recipe.cuisine ?? null,
-      recipe.createdAt,
-      now
+      [
+        recipe.id,
+        recipe.title,
+        recipe.sourceUrl,
+        recipe.sourceType,
+        recipe.mainImageUri ?? null,
+        recipe.baseServings,
+        recipe.isFavorite ? 1 : 0,
+        recipe.wantToCook ? 1 : 0,
+        recipe.isArchived ? 1 : 0,
+        recipe.cuisine ?? null,
+        recipe.createdAt,
+        now,
+      ]
     );
 
-    await db.runAsync('DELETE FROM ingredients WHERE recipe_id = ?', recipe.id);
-    await db.runAsync('DELETE FROM steps WHERE recipe_id = ?', recipe.id);
-    await db.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', recipe.id);
+    await db.runAsync('DELETE FROM ingredients WHERE recipe_id = ?', [recipe.id]);
+    await db.runAsync('DELETE FROM steps WHERE recipe_id = ?', [recipe.id]);
+    await db.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipe.id]);
 
     for (const ing of recipe.ingredients) {
       await db.runAsync(
         `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ing.id,
-        recipe.id,
-        ing.quantity,
-        ing.unit,
-        ing.name,
-        ing.notes ?? null,
-        ing.scalable ? 1 : 0,
-        ing.sortOrder
+        [
+          ing.id,
+          recipe.id,
+          ing.quantity,
+          ing.unit,
+          ing.name,
+          ing.notes ?? null,
+          ing.scalable ? 1 : 0,
+          ing.sortOrder,
+        ]
       );
     }
 
@@ -387,11 +391,13 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
       await db.runAsync(
         `INSERT INTO steps (id, recipe_id, order_idx, instruction, scalable_quantities_json)
          VALUES (?, ?, ?, ?, ?)`,
-        st.id,
-        recipe.id,
-        st.order,
-        st.instruction,
-        JSON.stringify(st.scalableQuantities ?? [])
+        [
+          st.id,
+          recipe.id,
+          st.order,
+          st.instruction,
+          JSON.stringify(st.scalableQuantities ?? []),
+        ]
       );
     }
 
@@ -399,8 +405,7 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
     for (const tid of tagIds) {
       await db.runAsync(
         'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
-        recipe.id,
-        tid
+        [recipe.id, tid]
       );
     }
 
@@ -416,18 +421,19 @@ export async function addCookLog(entry: CookLog): Promise<void> {
   await db.runAsync(
     `INSERT INTO cook_logs (id, recipe_id, cooked_at, photo_uri, notes, rating, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    entry.id,
-    entry.recipeId,
-    entry.cookedAt,
-    entry.photoUri ?? null,
-    entry.notes ?? null,
-    entry.rating ?? null,
-    entry.createdAt
+    [
+      entry.id,
+      entry.recipeId,
+      entry.cookedAt,
+      entry.photoUri ?? null,
+      entry.notes ?? null,
+      entry.rating ?? null,
+      entry.createdAt,
+    ]
   );
   await db.runAsync(
     'UPDATE recipes SET updated_at = ?, want_to_cook = 0 WHERE id = ?',
-    new Date().toISOString(),
-    entry.recipeId
+    [new Date().toISOString(), entry.recipeId]
   );
 }
 
@@ -436,7 +442,7 @@ export async function deleteCookLog(id: string): Promise<void> {
   const row = await db.getFirstAsync<{
     recipe_id: string;
     photo_uri: string | null;
-  }>('SELECT recipe_id, photo_uri FROM cook_logs WHERE id = ?', id);
+  }>('SELECT recipe_id, photo_uri FROM cook_logs WHERE id = ?', [id]);
   if (row?.photo_uri) {
     try {
       const info = await FileSystem.getInfoAsync(row.photo_uri);
@@ -447,12 +453,11 @@ export async function deleteCookLog(id: string): Promise<void> {
       /* ignore */
     }
   }
-  await db.runAsync('DELETE FROM cook_logs WHERE id = ?', id);
+  await db.runAsync('DELETE FROM cook_logs WHERE id = ?', [id]);
   if (row) {
     await db.runAsync(
       'UPDATE recipes SET updated_at = ? WHERE id = ?',
-      new Date().toISOString(),
-      row.recipe_id
+      [new Date().toISOString(), row.recipe_id]
     );
   }
 }
@@ -461,11 +466,11 @@ export async function deleteRecipe(id: string): Promise<void> {
   const db = await getDatabase();
   const photos = await db.getAllAsync<{ photo_uri: string | null }>(
     'SELECT photo_uri FROM cook_logs WHERE recipe_id = ?',
-    id
+    [id]
   );
   const main = await db.getFirstAsync<{ main_image_uri: string | null }>(
     'SELECT main_image_uri FROM recipes WHERE id = ?',
-    id
+    [id]
   );
   for (const row of photos) {
     if (!row.photo_uri) continue;
@@ -488,7 +493,7 @@ export async function deleteRecipe(id: string): Promise<void> {
       /* ignore */
     }
   }
-  await db.runAsync('DELETE FROM recipes WHERE id = ?', id);
+  await db.runAsync('DELETE FROM recipes WHERE id = ?', [id]);
 }
 
 export async function setRecipeFlags(
@@ -499,7 +504,7 @@ export async function setRecipeFlags(
   const current = await db.getFirstAsync<{
     is_favorite: number;
     want_to_cook: number;
-  }>('SELECT is_favorite, want_to_cook FROM recipes WHERE id = ?', recipeId);
+  }>('SELECT is_favorite, want_to_cook FROM recipes WHERE id = ?', [recipeId]);
   if (!current) return;
 
   const nextFavorite =
@@ -511,10 +516,7 @@ export async function setRecipeFlags(
     `UPDATE recipes
      SET is_favorite = ?, want_to_cook = ?, updated_at = ?
      WHERE id = ?`,
-    nextFavorite,
-    nextWant,
-    new Date().toISOString(),
-    recipeId
+    [nextFavorite, nextWant, new Date().toISOString(), recipeId]
   );
 }
 
@@ -524,9 +526,7 @@ export async function setRecipeArchived(recipeId: string, archived: boolean): Pr
     `UPDATE recipes
      SET is_archived = ?, updated_at = ?
      WHERE id = ?`,
-    archived ? 1 : 0,
-    new Date().toISOString(),
-    recipeId
+    [archived ? 1 : 0, new Date().toISOString(), recipeId]
   );
 }
 
@@ -536,7 +536,7 @@ export async function getRecipeServingsOverride(
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ last_servings: number | null }>(
     'SELECT last_servings FROM recipes WHERE id = ?',
-    recipeId
+    [recipeId]
   );
   if (!row || row.last_servings === null || !Number.isFinite(row.last_servings)) {
     return undefined;
@@ -553,9 +553,7 @@ export async function setRecipeServingsOverride(
     `UPDATE recipes
      SET last_servings = ?, updated_at = ?
      WHERE id = ?`,
-    servings,
-    new Date().toISOString(),
-    recipeId
+    [servings, new Date().toISOString(), recipeId]
   );
 }
 
@@ -566,7 +564,7 @@ export async function setRecipeMainImage(
   const db = await getDatabase();
   const current = await db.getFirstAsync<{ main_image_uri: string | null }>(
     'SELECT main_image_uri FROM recipes WHERE id = ?',
-    recipeId
+    [recipeId]
   );
   if (!current) return;
   const previous = current.main_image_uri;
@@ -574,9 +572,7 @@ export async function setRecipeMainImage(
     `UPDATE recipes
      SET main_image_uri = ?, updated_at = ?
      WHERE id = ?`,
-    mainImageUri ?? null,
-    new Date().toISOString(),
-    recipeId
+    [mainImageUri ?? null, new Date().toISOString(), recipeId]
   );
   if (previous && previous !== mainImageUri) {
     try {
@@ -608,7 +604,7 @@ export async function getCookLogById(
      FROM cook_logs c
      JOIN recipes r ON r.id = c.recipe_id
      WHERE c.id = ?`,
-    id
+    [id]
   );
   if (!row) return null;
   return {
@@ -644,8 +640,7 @@ export async function bulkEditRecipeTags(args: {
         for (const tagId of addTagIds) {
           await db.runAsync(
             'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
-            recipeId,
-            tagId
+            [recipeId, tagId]
           );
         }
       }
@@ -655,19 +650,21 @@ export async function bulkEditRecipeTags(args: {
            FROM recipe_tags rt
            JOIN tags t ON t.id = rt.tag_id
            WHERE rt.recipe_id = ?`,
-          recipeId
+          [recipeId]
         );
         for (const tag of existing) {
           if (removeTags.has(tag.name.toLowerCase())) {
             await db.runAsync(
               'DELETE FROM recipe_tags WHERE recipe_id = ? AND tag_id = ?',
-              recipeId,
-              tag.tag_id
+              [recipeId, tag.tag_id]
             );
           }
         }
       }
-      await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', new Date().toISOString(), recipeId);
+      await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
+        new Date().toISOString(),
+        recipeId,
+      ]);
     }
     await db.execAsync('COMMIT');
   } catch (error) {

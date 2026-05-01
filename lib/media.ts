@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 function cookDir(): string {
@@ -65,10 +65,20 @@ export async function estimateAppStorageBytes(): Promise<number> {
   if (!root) return 0;
 
   async function walk(path: string): Promise<void> {
-    const info = await FileSystem.getInfoAsync(path);
+    let info: FileSystem.FileInfo;
+    try {
+      info = await FileSystem.getInfoAsync(path);
+    } catch {
+      return;
+    }
     if (!info.exists) return;
     if (info.isDirectory) {
-      const list = await FileSystem.readDirectoryAsync(path);
+      let list: string[];
+      try {
+        list = await FileSystem.readDirectoryAsync(path);
+      } catch {
+        return;
+      }
       const prefix = path.endsWith('/') ? path : `${path}/`;
       for (const name of list) {
         await walk(`${prefix}${name}`);

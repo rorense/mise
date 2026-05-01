@@ -69,9 +69,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isBackupRows(value: unknown): value is BackupRow[] {
+  return Array.isArray(value);
+}
+
 function validatePayload(value: unknown): BackupPayload {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.tables) || !isRecord(value.settings)) {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !isRecord(value.tables) ||
+    !isRecord(value.settings)
+  ) {
     throw new Error('Invalid backup file');
+  }
+  const tables = value.tables;
+  if (
+    !isBackupRows(tables.recipes) ||
+    !isBackupRows(tables.ingredients) ||
+    !isBackupRows(tables.steps) ||
+    !isBackupRows(tables.tags) ||
+    !isBackupRows(tables.recipe_tags) ||
+    !isBackupRows(tables.cook_logs)
+  ) {
+    throw new Error('Invalid backup table format');
   }
   return value as BackupPayload;
 }
@@ -91,67 +111,74 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
       await db.runAsync(
         `INSERT INTO recipes (id, title, source_url, source_type, main_image_uri, base_servings, last_servings, is_favorite, want_to_cook, is_archived, cuisine, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id,
-        row.title,
-        row.source_url ?? '',
-        row.source_type,
-        row.main_image_uri ?? null,
-        row.base_servings,
-        row.last_servings ?? null,
-        row.is_favorite ?? 0,
-        row.want_to_cook ?? 0,
-        row.is_archived ?? 0,
-        row.cuisine ?? null,
-        row.created_at,
-        row.updated_at
+        [
+          row.id,
+          row.title,
+          row.source_url ?? '',
+          row.source_type,
+          row.main_image_uri ?? null,
+          row.base_servings,
+          row.last_servings ?? null,
+          row.is_favorite ?? 0,
+          row.want_to_cook ?? 0,
+          row.is_archived ?? 0,
+          row.cuisine ?? null,
+          row.created_at,
+          row.updated_at,
+        ]
       );
     }
     for (const row of parsed.tables.ingredients) {
       await db.runAsync(
         `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id,
-        row.recipe_id,
-        row.quantity,
-        row.unit ?? null,
-        row.name,
-        row.notes ?? null,
-        row.scalable ?? 1,
-        row.sort_order ?? 0
+        [
+          row.id,
+          row.recipe_id,
+          row.quantity,
+          row.unit ?? null,
+          row.name,
+          row.notes ?? null,
+          row.scalable ?? 1,
+          row.sort_order ?? 0,
+        ]
       );
     }
     for (const row of parsed.tables.steps) {
       await db.runAsync(
         `INSERT INTO steps (id, recipe_id, order_idx, instruction, scalable_quantities_json)
          VALUES (?, ?, ?, ?, ?)`,
-        row.id,
-        row.recipe_id,
-        row.order_idx,
-        row.instruction,
-        row.scalable_quantities_json ?? '[]'
+        [
+          row.id,
+          row.recipe_id,
+          row.order_idx,
+          row.instruction,
+          row.scalable_quantities_json ?? '[]',
+        ]
       );
     }
     for (const row of parsed.tables.tags) {
-      await db.runAsync('INSERT INTO tags (id, name) VALUES (?, ?)', row.id, row.name);
+      await db.runAsync('INSERT INTO tags (id, name) VALUES (?, ?)', [row.id, row.name]);
     }
     for (const row of parsed.tables.recipe_tags) {
       await db.runAsync(
         'INSERT INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
-        row.recipe_id,
-        row.tag_id
+        [row.recipe_id, row.tag_id]
       );
     }
     for (const row of parsed.tables.cook_logs) {
       await db.runAsync(
         `INSERT INTO cook_logs (id, recipe_id, cooked_at, photo_uri, notes, rating, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        row.id,
-        row.recipe_id,
-        row.cooked_at,
-        row.photo_uri ?? null,
-        row.notes ?? null,
-        row.rating ?? null,
-        row.created_at
+        [
+          row.id,
+          row.recipe_id,
+          row.cooked_at,
+          row.photo_uri ?? null,
+          row.notes ?? null,
+          row.rating ?? null,
+          row.created_at,
+        ]
       );
     }
     await db.execAsync('PRAGMA foreign_keys = ON;');

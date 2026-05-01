@@ -16,7 +16,7 @@ import {
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -42,21 +42,25 @@ export default function SettingsScreen() {
   } | null>(null);
 
   const load = useCallback(async () => {
-    const [provider, yt, bytes] = await Promise.all([
-      getAiProvider(),
-      getYoutubeApiKey(),
-      estimateAppStorageBytes(),
-    ]);
-    const units = await getUnitsDisplayPreference();
-    setAiProviderState(provider);
-    setYoutube(yt ?? '');
-    setStorage(formatBytes(bytes));
-    setUnitsDisplay(units);
+    try {
+      const [provider, yt, bytes] = await Promise.all([
+        getAiProvider(),
+        getYoutubeApiKey(),
+        estimateAppStorageBytes(),
+      ]);
+      const units = await getUnitsDisplayPreference();
+      setAiProviderState(provider);
+      setYoutube(yt ?? '');
+      setStorage(formatBytes(bytes));
+      setUnitsDisplay(units);
+    } catch {
+      setStorage('Unavailable');
+    }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load])
   );
 
@@ -211,16 +215,27 @@ export default function SettingsScreen() {
       </Text>
       <Pressable
         onPress={async () => {
-          const json = await exportBackupJson();
-          const backupPath = `${FileSystem.documentDirectory}mise-backup-${Date.now()}.json`;
-          await FileSystem.writeAsStringAsync(backupPath, json);
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(backupPath);
+          try {
+            const json = await exportBackupJson();
+            const docDir = FileSystem.documentDirectory;
+            if (!docDir) {
+              throw new Error('Storage directory unavailable');
+            }
+            const backupPath = `${docDir}mise-backup-${Date.now()}.json`;
+            await FileSystem.writeAsStringAsync(backupPath, json);
+            if (await Sharing.isAvailableAsync()) {
+              await Sharing.shareAsync(backupPath);
+            }
+            setDialog({
+              title: 'Backup ready',
+              message: 'Backup file generated and ready to share.',
+            });
+          } catch {
+            setDialog({
+              title: 'Backup failed',
+              message: 'Could not export backup on this device.',
+            });
           }
-          setDialog({
-            title: 'Backup ready',
-            message: 'Backup file generated and ready to share.',
-          });
         }}
         style={{
           backgroundColor: colors.surface,

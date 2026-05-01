@@ -96,7 +96,7 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   for (const version of versions) {
     if (version > current) {
       await db.execAsync(MIGRATIONS[version]);
-      await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', version);
+      await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
       current = version;
     }
   }
