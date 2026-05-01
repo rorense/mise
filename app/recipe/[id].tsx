@@ -1,6 +1,7 @@
 import { AppDialog, type AppDialogAction } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
 import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeChatSheet';
 import {
   addCookLog,
@@ -13,10 +14,8 @@ import {
 } from '@/data/recipes';
 import type { Recipe } from '@/types/recipe';
 import {
-  formatQuantity,
+  formatIngredientAmount,
   renderStepInstruction,
-  scaleForIngredient,
-  type UnitsDisplayMode,
 } from '@/domain/scaling';
 import { resolveRecipeHeroImage } from '@/domain/recipeImages';
 import {
@@ -26,7 +25,6 @@ import {
 import {
   getAiProvider,
   getRecipeSavedServings,
-  getUnitsDisplayPreference,
   setRecipeSavedServings,
 } from '@/lib/secrets';
 import {
@@ -70,13 +68,13 @@ export default function RecipeDetailScreen() {
   const [noteDraft, setNoteDraft] = useState('');
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
   const [showArchiveRecipeConfirm, setShowArchiveRecipeConfirm] = useState(false);
-  const [unitsMode, setUnitsMode] = useState<UnitsDisplayMode>('compact');
   const [readMode, setReadMode] = useState(false);
   const [checklistMode, setChecklistMode] = useState(false);
   const [checkedIngredientIds, setCheckedIngredientIds] = useState<string[]>([]);
   const [showIngredients, setShowIngredients] = useState(true);
   const [showMethod, setShowMethod] = useState(true);
   const [showCookJournal, setShowCookJournal] = useState(true);
+  const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -88,12 +86,8 @@ export default function RecipeDetailScreen() {
     setIsLoading(true);
     setIsMissing(false);
     const seq = ++loadSeqRef.current;
-    const [r, unitsPreference] = await Promise.all([
-      getRecipeById(String(id)),
-      getUnitsDisplayPreference(),
-    ]);
+    const r = await getRecipeById(String(id));
     if (seq !== loadSeqRef.current) return;
-    setUnitsMode(unitsPreference);
     if (r) {
       const maxServings = Math.max(12, Math.round(r.baseServings));
       const [savedSecure, savedDb] = await Promise.all([
@@ -166,8 +160,7 @@ export default function RecipeDetailScreen() {
       recipe.title,
       '',
       ...recipe.ingredients.map((i) => {
-        const q = scaleForIngredient(i, recipe.baseServings, servings);
-        return `- ${formatQuantity(q, i.unit, unitsMode)} ${i.name}`;
+        return `- ${formatIngredientAmount(i, recipe.baseServings, servings)} ${i.name}`;
       }),
       '',
       ...recipe.steps
@@ -177,8 +170,7 @@ export default function RecipeDetailScreen() {
             `${idx + 1}. ${renderStepInstruction(
               s,
               recipe.baseServings,
-              servings,
-              unitsMode
+              servings
             )}`
         ),
     ];
@@ -360,7 +352,9 @@ export default function RecipeDetailScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         <View style={{ height: 260, backgroundColor: colors.border }}>
           {hero ? (
-            <Image source={{ uri: hero }} style={{ width: '100%', height: '100%' }} />
+            <Pressable onPress={() => setFullscreenImageUri(hero)} style={{ width: '100%', height: '100%' }}>
+              <Image source={{ uri: hero }} style={{ width: '100%', height: '100%' }} />
+            </Pressable>
           ) : (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
@@ -631,7 +625,7 @@ export default function RecipeDetailScreen() {
           </Pressable>
           {(readMode || showIngredients)
             ? recipe.ingredients.map((ing) => {
-            const q = scaleForIngredient(ing, recipe.baseServings, servings);
+            const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
             const checked = checkedIngredientIds.includes(ing.id);
             return (
               <Pressable
@@ -660,8 +654,8 @@ export default function RecipeDetailScreen() {
                   }}
                 >
                   {!checklistMode ? '· ' : ''}
-                  {formatQuantity(q, ing.unit, unitsMode)} {ing.name}
-                  {!ing.scalable ? '  ⚠ adjust to taste' : ''}
+                  {amount} {ing.name}
+                  {!ing.scalable && ing.amountMode !== 'to_taste' ? '  ⚠ adjust to taste' : ''}
                 </Text>
               </Pressable>
             );
@@ -706,7 +700,7 @@ export default function RecipeDetailScreen() {
                     lineHeight: readMode ? 28 : 22,
                   }}
                 >
-                  {renderStepInstruction(s, recipe.baseServings, servings, unitsMode)}
+                  {renderStepInstruction(s, recipe.baseServings, servings)}
                 </Text>
               </View>
             ))
@@ -729,8 +723,8 @@ export default function RecipeDetailScreen() {
               {showCookJournal ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
                   {recipe.cookLogs.map((log) => (
-                    <Pressable key={log.id} onPress={() => router.push(`/cook-log/${log.id}`)}>
-                      <View style={{ width: 120 }}>
+                    <View key={log.id} style={{ width: 120 }}>
+                      <Pressable onPress={() => (log.photoUri ? setFullscreenImageUri(log.photoUri) : router.push(`/cook-log/${log.id}`))}>
                         {log.photoUri ? (
                           <Image source={{ uri: log.photoUri }} style={{ width: 120, height: 120, borderRadius: 14 }} />
                         ) : (
@@ -743,6 +737,8 @@ export default function RecipeDetailScreen() {
                             }}
                           />
                         )}
+                      </Pressable>
+                      <Pressable onPress={() => router.push(`/cook-log/${log.id}`)}>
                         <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
                           {new Date(log.cookedAt).toLocaleDateString()}
                           {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
@@ -761,8 +757,8 @@ export default function RecipeDetailScreen() {
                             {log.notes}
                           </Text>
                         ) : null}
-                      </View>
-                    </Pressable>
+                      </Pressable>
+                    </View>
                   ))}
                 </ScrollView>
               ) : null}
@@ -878,6 +874,10 @@ export default function RecipeDetailScreen() {
         message={dialog?.message ?? ''}
         actions={dialog?.actions ?? []}
         onClose={() => setDialog(null)}
+      />
+      <FullscreenImageViewer
+        imageUri={fullscreenImageUri}
+        onClose={() => setFullscreenImageUri(null)}
       />
     </View>
   );

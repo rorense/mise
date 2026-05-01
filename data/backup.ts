@@ -1,9 +1,7 @@
 import { getDatabase } from '@/db/client';
 import {
   getAppearance,
-  getUnitsDisplayPreference,
   setAppearance,
-  setUnitsDisplayPreference,
 } from '@/lib/secrets';
 
 type BackupPayload = {
@@ -11,7 +9,7 @@ type BackupPayload = {
   exportedAt: string;
   settings: {
     appearance: 'system' | 'light' | 'dark' | null;
-    unitsDisplay: 'compact' | 'friendly';
+    unitsDisplay: 'compact';
   };
   tables: {
     recipes: BackupRow[];
@@ -29,10 +27,7 @@ const TABLES = ['recipes', 'ingredients', 'steps', 'tags', 'recipe_tags', 'cook_
 
 export async function exportBackupPayload(): Promise<BackupPayload> {
   const db = await getDatabase();
-  const [appearance, unitsDisplay] = await Promise.all([
-    getAppearance(),
-    getUnitsDisplayPreference(),
-  ]);
+  const appearance = await getAppearance();
   const [recipes, ingredients, steps, tags, recipeTags, cookLogs] = await Promise.all([
     db.getAllAsync<BackupRow>('SELECT * FROM recipes'),
     db.getAllAsync<BackupRow>('SELECT * FROM ingredients'),
@@ -47,7 +42,7 @@ export async function exportBackupPayload(): Promise<BackupPayload> {
     exportedAt: new Date().toISOString(),
     settings: {
       appearance,
-      unitsDisplay,
+      unitsDisplay: 'compact',
     },
     tables: {
       recipes,
@@ -130,8 +125,8 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
     }
     for (const row of parsed.tables.ingredients) {
       await db.runAsync(
-        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           row.id,
           row.recipe_id,
@@ -140,6 +135,7 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
           row.name,
           row.notes ?? null,
           row.scalable ?? 1,
+          row.amount_mode === 'to_taste' ? 'to_taste' : 'exact',
           row.sort_order ?? 0,
         ]
       );
@@ -192,7 +188,4 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
   if (parsed.settings.appearance === 'light' || parsed.settings.appearance === 'dark' || parsed.settings.appearance === 'system') {
     await setAppearance(parsed.settings.appearance);
   }
-  await setUnitsDisplayPreference(
-    parsed.settings.unitsDisplay === 'friendly' ? 'friendly' : 'compact'
-  );
 }

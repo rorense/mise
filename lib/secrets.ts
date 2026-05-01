@@ -1,6 +1,6 @@
 import type { AppearanceMode } from '@/theme/colors';
 import * as SecureStore from 'expo-secure-store';
-export type UnitsDisplayPreference = 'compact' | 'friendly';
+export type UnitsDisplayPreference = 'compact';
 export type AiProvider = 'openai' | 'gemini';
 
 const KEY_OPENAI = 'mise_openai_api_key';
@@ -52,8 +52,7 @@ export async function setOnboarded(done: boolean): Promise<void> {
 }
 
 export async function getUnitsDisplayPreference(): Promise<UnitsDisplayPreference> {
-  const value = await SecureStore.getItemAsync(KEY_UNITS_DISPLAY);
-  return value === 'friendly' ? 'friendly' : 'compact';
+  return 'compact';
 }
 
 export async function setUnitsDisplayPreference(

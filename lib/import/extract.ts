@@ -9,7 +9,7 @@ const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified J
   "baseServings": number,
   "cuisine": string | null,
   "tags": string[],
-  "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean }[],
+  "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean, "amountMode": "exact" | "to_taste" }[],
   "steps": { "instruction": string, "scalableQuantities": { "placeholder": string, "baseQuantity": number, "unit": string }[] }[]
 }
 
@@ -18,6 +18,7 @@ Rules:
 - Convert all amounts to metric in the numbers you output.
 - Each step "instruction" must include placeholders like {{qty_1}} for every scalable quantity in that step, and scalableQuantities must define each placeholder with baseQuantity at baseServings.
 - For eggs, cloves, sprigs use unit null and round-friendly base quantities; set scalable true unless item is salt, baking powder, yeast, or spice — then scalable false.
+- Use amountMode "to_taste" when an ingredient is by feel (e.g., salt, pepper, chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
 - If a step has no numeric amount, scalableQuantities can be [] and instruction is plain text.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
 
@@ -39,14 +40,18 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
       row.notes === null || row.notes === undefined
         ? undefined
         : String(row.notes);
-    const scalable = row.scalable !== false;
+    const amountMode = row.amountMode === 'to_taste' ? 'to_taste' : 'exact';
+    const looksLikeToTasteText =
+      /to taste/i.test(name) || /to taste/i.test(notes ?? '');
+    const resolvedAmountMode = looksLikeToTasteText ? 'to_taste' : amountMode;
     out.push({
       id: newId(),
-      quantity,
-      unit,
+      quantity: resolvedAmountMode === 'to_taste' ? 0 : quantity,
+      unit: resolvedAmountMode === 'to_taste' ? null : unit,
       name,
       notes,
-      scalable,
+      scalable: resolvedAmountMode === 'to_taste' ? false : row.scalable !== false,
+      amountMode: resolvedAmountMode,
       sortOrder: sortOrder++,
     });
   }

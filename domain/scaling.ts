@@ -1,7 +1,5 @@
 import type { Ingredient, Step } from '@/types/recipe';
 
-export type UnitsDisplayMode = 'compact' | 'friendly';
-
 const COUNTABLE_UNITS = new Set(
   [
     '',
@@ -82,6 +80,7 @@ export function scaleForIngredient(
   baseServings: number,
   currentServings: number
 ): number {
+  if (ingredient.amountMode === 'to_taste') return 0;
   if (!ingredient.scalable) return ingredient.quantity;
   let q = scaleQuantity(ingredient.quantity, baseServings, currentServings);
   const u = ingredient.unit?.toLowerCase() ?? '';
@@ -94,39 +93,30 @@ export function scaleForIngredient(
   return q;
 }
 
-export function friendlySmallAmount(
-  quantity: number,
-  unit: string | null
-): string | null {
-  const u = unit?.toLowerCase() ?? '';
-  if (quantity > 0 && quantity < 0.5 && (u === 'ml' || u === '')) {
-    return 'a few drops';
-  }
-  if (quantity > 0 && quantity <= 0.25 && (u === 'tsp' || u === 'teaspoon')) {
-    return 'a pinch';
-  }
-  if (quantity > 0 && quantity < 0.05 && u === 'g') {
-    return 'a pinch';
-  }
-  return null;
-}
-
 export function formatQuantity(
   quantity: number,
-  unit: string | null,
-  mode: UnitsDisplayMode = 'compact'
+  unit: string | null
 ): string {
-  const friendly = mode === 'friendly' ? friendlySmallAmount(quantity, unit) : null;
-  if (friendly) return friendly;
   const rounded = formatNumericQuantity(quantity);
   return unit ? `${rounded} ${unit}` : rounded;
+}
+
+export function formatIngredientAmount(
+  ingredient: Ingredient,
+  baseServings: number,
+  currentServings: number
+): string {
+  if (ingredient.amountMode === 'to_taste') {
+    return 'to taste';
+  }
+  const quantity = scaleForIngredient(ingredient, baseServings, currentServings);
+  return formatQuantity(quantity, ingredient.unit);
 }
 
 export function renderStepInstruction(
   step: Step,
   baseServings: number,
-  currentServings: number,
-  mode: UnitsDisplayMode = 'compact'
+  currentServings: number
 ): string {
   let text = step.instruction;
   for (const sq of step.scalableQuantities) {
@@ -137,7 +127,7 @@ export function renderStepInstruction(
       !!sq.unit && hasUnitAdjacentToPlaceholder(text, sq.placeholder, sq.unit);
     const replacement = hasAdjacentUnit
       ? formatNumericQuantity(scaled)
-      : formatQuantity(scaled, sq.unit || null, mode);
+      : formatQuantity(scaled, sq.unit || null);
     text = text.split(sq.placeholder).join(replacement);
   }
   return text;
@@ -146,15 +136,13 @@ export function renderStepInstruction(
 export function buildChatIngredientLines(
   ingredients: Ingredient[],
   baseServings: number,
-  currentServings: number,
-  mode: UnitsDisplayMode = 'compact'
+  currentServings: number
 ): string {
   return ingredients
     .map((i) => {
-      const q = scaleForIngredient(i, baseServings, currentServings);
-      const qty = formatQuantity(q, i.unit, mode);
+      const qty = formatIngredientAmount(i, baseServings, currentServings);
       const notes = i.notes ? ` (${i.notes})` : '';
-      const hint = !i.scalable ? ' [adjust to taste]' : '';
+      const hint = !i.scalable && i.amountMode !== 'to_taste' ? ' [adjust to taste]' : '';
       return `- ${qty} ${i.name}${notes}${hint}`;
     })
     .join('\n');

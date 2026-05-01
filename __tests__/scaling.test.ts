@@ -20,6 +20,7 @@ describe('scaleForIngredient', () => {
       unit: 'g',
       name: 'salt',
       scalable: false,
+      amountMode: 'exact',
       sortOrder: 0,
     };
     expect(scaleForIngredient(ing, 4, 8)).toBe(5);
@@ -32,19 +33,29 @@ describe('scaleForIngredient', () => {
       unit: null,
       name: 'free-range eggs',
       scalable: true,
+      amountMode: 'exact',
       sortOrder: 0,
     };
     expect(scaleForIngredient(ing, 4, 1)).toBe(1);
   });
+
+  it('keeps to-taste ingredients unscaled at display amount', () => {
+    const ing: Ingredient = {
+      id: '1',
+      quantity: 0,
+      unit: null,
+      name: 'salt',
+      scalable: false,
+      amountMode: 'to_taste',
+      sortOrder: 0,
+    };
+    expect(scaleForIngredient(ing, 4, 10)).toBe(0);
+  });
 });
 
 describe('formatQuantity', () => {
-  it('uses numeric output in compact mode', () => {
-    expect(formatQuantity(0.2, 'tsp', 'compact')).toBe('0.2 tsp');
-  });
-
-  it('uses friendly output in friendly mode', () => {
-    expect(formatQuantity(0.2, 'tsp', 'friendly')).toBe('a pinch');
+  it('uses numeric output', () => {
+    expect(formatQuantity(0.2, 'tsp')).toBe('0.2 tsp');
   });
 });
 
@@ -61,8 +72,7 @@ describe('renderStepInstruction', () => {
           ],
         },
         4,
-        2,
-        'compact'
+        2
       )
     ).toBe('Add 50 g sugar and mix.');
   });
@@ -79,8 +89,7 @@ describe('renderStepInstruction', () => {
           ],
         },
         2,
-        4,
-        'compact'
+        4
       )
     ).toBe('Whisk in 60 ml.');
   });

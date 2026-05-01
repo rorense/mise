@@ -6,13 +6,10 @@ import { BackButton } from '@/components/BackButton';
 import {
   getAiProvider,
   getAppearance,
-  getUnitsDisplayPreference,
   getYoutubeApiKey,
   setAiProvider,
-  setUnitsDisplayPreference,
   type AiProvider,
   setYoutubeApiKey,
-  type UnitsDisplayPreference,
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
@@ -33,8 +30,6 @@ export default function SettingsScreen() {
   const [aiProvider, setAiProviderState] = useState<AiProvider>('openai');
   const [youtube, setYoutube] = useState('');
   const [storage, setStorage] = useState('—');
-  const [unitsDisplay, setUnitsDisplay] =
-    useState<UnitsDisplayPreference>('compact');
   const [backupDraft, setBackupDraft] = useState('');
   const [dialog, setDialog] = useState<{
     title: string;
@@ -48,11 +43,9 @@ export default function SettingsScreen() {
         getYoutubeApiKey(),
         estimateAppStorageBytes(),
       ]);
-      const units = await getUnitsDisplayPreference();
       setAiProviderState(provider);
       setYoutube(yt ?? '');
       setStorage(formatBytes(bytes));
-      setUnitsDisplay(units);
     } catch {
       setStorage('Unavailable');
     }
@@ -177,33 +170,6 @@ export default function SettingsScreen() {
           </Pressable>
         ))}
       </View>
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Units display
-      </Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {(['compact', 'friendly'] as UnitsDisplayPreference[]).map((value) => (
-          <Pressable
-            key={value}
-            onPress={async () => {
-              setUnitsDisplay(value);
-              await setUnitsDisplayPreference(value);
-            }}
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderRadius: 999,
-              backgroundColor: unitsDisplay === value ? colors.primary + '33' : colors.surface,
-              borderWidth: 1,
-              borderColor: unitsDisplay === value ? colors.primary : colors.border,
-            }}
-          >
-            <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-              {value === 'compact' ? 'Numeric' : 'Friendly'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
         Storage
       </Text>

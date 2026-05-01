@@ -4,6 +4,7 @@ import { newId } from '@/lib/id';
 import type {
   CookLog,
   Ingredient,
+  IngredientAmountMode,
   Recipe,
   RecipeListItem,
   SourceType,
@@ -35,6 +36,7 @@ type IngredientRow = {
   name: string;
   notes: string | null;
   scalable: number;
+  amount_mode: IngredientAmountMode;
   sort_order: number;
 };
 
@@ -64,6 +66,7 @@ function mapIngredient(r: IngredientRow): Ingredient {
     name: r.name,
     notes: r.notes ?? undefined,
     scalable: r.scalable !== 0,
+    amountMode: r.amount_mode ?? 'exact',
     sortOrder: r.sort_order,
   };
 }
@@ -372,8 +375,8 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
 
     for (const ing of recipe.ingredients) {
       await db.runAsync(
-        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           ing.id,
           recipe.id,
@@ -382,6 +385,7 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
           ing.name,
           ing.notes ?? null,
           ing.scalable ? 1 : 0,
+          ing.amountMode ?? 'exact',
           ing.sortOrder,
         ]
       );

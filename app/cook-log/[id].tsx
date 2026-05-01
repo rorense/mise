@@ -1,6 +1,7 @@
 import { deleteCookLog, getCookLogById } from '@/data/recipes';
 import { BackButton } from '@/components/BackButton';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
 import { useTheme } from '@/theme/ThemeContext';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -11,6 +12,7 @@ export default function CookLogScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof getCookLogById>>>(null);
+  const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
@@ -34,7 +36,9 @@ export default function CookLogScreen() {
       <BackButton />
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
         {log.photoUri ? (
-          <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
+          <Pressable onPress={() => setFullscreenImageUri(log.photoUri)}>
+            <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
+          </Pressable>
         ) : null}
         <View style={{ padding: 20, paddingTop: 72, gap: 12 }}>
         <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>{recipeTitle}</Text>
@@ -73,6 +77,10 @@ export default function CookLogScreen() {
           await deleteCookLog(log.id);
           router.back();
         }}
+      />
+      <FullscreenImageViewer
+        imageUri={fullscreenImageUri}
+        onClose={() => setFullscreenImageUri(null)}
       />
     </View>
   );

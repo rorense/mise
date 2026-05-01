@@ -6,6 +6,8 @@ export interface ScalableQuantity {
   unit: string;
 }
 
+export type IngredientAmountMode = 'exact' | 'to_taste';
+
 export interface Ingredient {
   id: string;
   quantity: number;
@@ -13,6 +15,7 @@ export interface Ingredient {
   name: string;
   notes?: string;
   scalable: boolean;
+  amountMode: IngredientAmountMode;
   sortOrder: number;
 }
 

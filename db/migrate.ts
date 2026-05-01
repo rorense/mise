@@ -21,6 +21,7 @@ const MIGRATIONS: Record<number, string> = {
       name TEXT NOT NULL,
       notes TEXT,
       scalable INTEGER NOT NULL DEFAULT 1,
+      amount_mode TEXT NOT NULL DEFAULT 'exact' CHECK(amount_mode IN ('exact','to_taste')),
       sort_order INTEGER NOT NULL DEFAULT 0
     );
 
@@ -73,6 +74,9 @@ const MIGRATIONS: Record<number, string> = {
   `,
   5: `
     ALTER TABLE recipes ADD COLUMN last_servings REAL;
+  `,
+  6: `
+    ALTER TABLE ingredients ADD COLUMN amount_mode TEXT NOT NULL DEFAULT 'exact' CHECK(amount_mode IN ('exact','to_taste'));
   `,
 };
 

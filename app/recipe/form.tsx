@@ -18,16 +18,16 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import {
-  NestableScrollContainer,
-  NestableDraggableFlatList,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 
 const COMMON_INGREDIENT_UNITS: { label: string; value: string | null }[] = [
   { label: 'g', value: 'g' },
@@ -55,6 +55,14 @@ function mergeAiExtractIntoDraft(
     steps: extracted.steps,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function formatIngredientPreview(ingredient: Ingredient): string {
+  if (ingredient.amountMode === 'to_taste') {
+    return `to taste ${ingredient.name || 'Untitled ingredient'}`;
+  }
+  const unit = ingredient.unit ? ` ${ingredient.unit}` : '';
+  return `${ingredient.quantity}${unit} ${ingredient.name || 'Untitled ingredient'}`;
 }
 
 export default function RecipeFormScreen() {
@@ -118,6 +126,7 @@ export default function RecipeFormScreen() {
       unit: 'g',
       name: '',
       scalable: true,
+      amountMode: 'exact',
       sortOrder: recipe.ingredients.length,
     };
     setRecipe({ ...recipe, ingredients: [...recipe.ingredients, next] });
@@ -168,7 +177,7 @@ export default function RecipeFormScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
-      <NestableScrollContainer
+      <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 14, paddingBottom: 48 }}
       >
@@ -386,56 +395,93 @@ export default function RecipeFormScreen() {
             }}
           >
             <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
-              {ing.quantity} {ing.unit ?? ''} {ing.name || 'Untitled ingredient'}
+              {formatIngredientPreview(ing)}
             </Text>
           </Pressable>
           {activeIngredientId === ing.id ? (
             <>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput
-                  value={String(ing.quantity)}
-                  onChangeText={(t) => {
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
+                  To taste (no amount or unit)
+                </Text>
+                <Switch
+                  value={ing.amountMode === 'to_taste'}
+                  onValueChange={(toTaste) => {
                     const next = [...recipe.ingredients];
-                    next[idx] = { ...ing, quantity: Number(t) || 0 };
+                    next[idx] = toTaste
+                      ? { ...ing, amountMode: 'to_taste', quantity: 0, unit: null, scalable: false }
+                      : { ...ing, amountMode: 'exact', scalable: true };
                     setRecipe({ ...recipe, ingredients: next });
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="Qty"
-                  placeholderTextColor={colors.textSecondary}
-                  style={{
-                    width: 64,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    borderRadius: 8,
-                    padding: 8,
-                    color: colors.textPrimary,
+                    setShowUnitPickerForIngredientId(null);
                   }}
                 />
-                <Pressable
-                  onPress={() =>
-                    setShowUnitPickerForIngredientId((current) =>
-                      current === ing.id ? null : ing.id
-                    )
-                  }
-                  style={{
-                    minWidth: 72,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    borderRadius: 8,
-                    padding: 8,
-                    justifyContent: 'center',
-                    backgroundColor: colors.surface,
-                  }}
-                >
-                  <Text
+              </View>
+              {ing.amountMode === 'exact' ? (
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    value={String(ing.quantity)}
+                    onChangeText={(t) => {
+                      const next = [...recipe.ingredients];
+                      next[idx] = { ...ing, quantity: Number(t) || 0 };
+                      setRecipe({ ...recipe, ingredients: next });
+                    }}
+                    keyboardType="decimal-pad"
+                    placeholder="Qty"
+                    placeholderTextColor={colors.textSecondary}
                     style={{
-                      color: ing.unit ? colors.textPrimary : colors.textSecondary,
-                      fontFamily: 'DMSans_400Regular',
+                      width: 64,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 8,
+                      padding: 8,
+                      color: colors.textPrimary,
+                    }}
+                  />
+                  <Pressable
+                    onPress={() =>
+                      setShowUnitPickerForIngredientId((current) =>
+                        current === ing.id ? null : ing.id
+                      )
+                    }
+                    style={{
+                      minWidth: 72,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 8,
+                      padding: 8,
+                      justifyContent: 'center',
+                      backgroundColor: colors.surface,
                     }}
                   >
-                    {ing.unit ?? 'Unit'}
-                  </Text>
-                </Pressable>
+                    <Text
+                      style={{
+                        color: ing.unit ? colors.textPrimary : colors.textSecondary,
+                        fontFamily: 'DMSans_400Regular',
+                      }}
+                    >
+                      {ing.unit ?? 'Unit'}
+                    </Text>
+                  </Pressable>
+                  <TextInput
+                    value={ing.name}
+                    onChangeText={(t) => {
+                      const next = [...recipe.ingredients];
+                      next[idx] = { ...ing, name: t };
+                      setRecipe({ ...recipe, ingredients: next });
+                    }}
+                    placeholder="Ingredient"
+                    placeholderTextColor={colors.textSecondary}
+                    style={{
+                      flex: 1,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 8,
+                      padding: 8,
+                      color: colors.textPrimary,
+                    }}
+                  />
+                </View>
+              ) : (
                 <TextInput
                   value={ing.name}
                   onChangeText={(t) => {
@@ -454,8 +500,8 @@ export default function RecipeFormScreen() {
                     color: colors.textPrimary,
                   }}
                 />
-              </View>
-              {showUnitPickerForIngredientId === ing.id ? (
+              )}
+              {ing.amountMode === 'exact' && showUnitPickerForIngredientId === ing.id ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {COMMON_INGREDIENT_UNITS.map((option) => {
                     const selected = (ing.unit ?? null) === option.value;
@@ -490,19 +536,21 @@ export default function RecipeFormScreen() {
                   })}
                 </View>
               ) : null}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                  Scales with servings
-                </Text>
-                <Switch
-                  value={ing.scalable}
-                  onValueChange={(v) => {
-                    const next = [...recipe.ingredients];
-                    next[idx] = { ...ing, scalable: v };
-                    setRecipe({ ...recipe, ingredients: next });
-                  }}
-                />
-              </View>
+              {ing.amountMode === 'exact' ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
+                    Scales with servings
+                  </Text>
+                  <Switch
+                    value={ing.scalable}
+                    onValueChange={(v) => {
+                      const next = [...recipe.ingredients];
+                      next[idx] = { ...ing, scalable: v };
+                      setRecipe({ ...recipe, ingredients: next });
+                    }}
+                  />
+                </View>
+              ) : null}
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Pressable
                   onPress={() => {
@@ -548,7 +596,7 @@ export default function RecipeFormScreen() {
         </Text>
       ) : null}
       {showSteps ? (
-      <NestableDraggableFlatList
+      <DraggableFlatList
         data={recipe.steps}
         keyExtractor={(item) => item.id}
         scrollEnabled={false}
@@ -658,7 +706,7 @@ export default function RecipeFormScreen() {
         >
           <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save</Text>
         </Pressable>
-      </NestableScrollContainer>
+      </ScrollView>
       <AppDialog
         visible={dialog !== null}
         title={dialog?.title ?? ''}

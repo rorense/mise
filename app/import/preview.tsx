@@ -21,7 +21,10 @@ export default function ImportPreviewScreen() {
   const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(() => takeImportDraft());
   const [ingredientText, setIngredientText] = useState(() =>
     (draft?.ingredients ?? [])
-      .map((i) => `${i.quantity}|${i.unit ?? ''}|${i.name}|${i.scalable ? 'y' : 'n'}|${i.notes ?? ''}`)
+      .map(
+        (i) =>
+          `${i.quantity}|${i.unit ?? ''}|${i.name}|${i.scalable ? 'y' : 'n'}|${i.notes ?? ''}|${i.amountMode ?? 'exact'}`
+      )
       .join('\n')
   );
   const [stepText, setStepText] = useState(() =>
@@ -57,18 +60,23 @@ export default function ImportPreviewScreen() {
       .map((l) => l.trim())
       .filter(Boolean);
     const next = lines.map((line, idx) => {
-      const [qtyRaw, unitRaw, nameRaw, scalableRaw, notesRaw] = line
+      const [quantityRaw, unitTextRaw, ingredientNameRaw, ingredientScalableRaw, ingredientNotesRaw, modeRaw] = line
         .split('|')
         .map((part) => part.trim());
       const existing = draft.ingredients[idx];
-      const quantity = Number(qtyRaw);
+      const quantity = Number(quantityRaw);
+      const toTaste =
+        (modeRaw ?? 'exact') === 'to_taste' ||
+        /to taste/i.test(ingredientNameRaw) ||
+        /to taste/i.test(ingredientNotesRaw ?? '');
       return {
         id: existing?.id ?? newId(),
-        quantity: Number.isFinite(quantity) ? quantity : 0,
-        unit: unitRaw ? unitRaw : null,
-        name: nameRaw || existing?.name || '',
-        notes: notesRaw ? notesRaw : undefined,
-        scalable: (scalableRaw || 'y').toLowerCase() !== 'n',
+        quantity: toTaste ? 0 : Number.isFinite(quantity) ? quantity : 0,
+        unit: toTaste ? null : unitTextRaw ? unitTextRaw : null,
+        name: ingredientNameRaw || existing?.name || '',
+        notes: ingredientNotesRaw ? ingredientNotesRaw : undefined,
+        scalable: toTaste ? false : (ingredientScalableRaw || 'y').toLowerCase() !== 'n',
+        amountMode: toTaste ? 'to_taste' : 'exact',
         sortOrder: idx,
       };
     });
@@ -139,7 +147,7 @@ export default function ImportPreviewScreen() {
         colors={colors}
       />
       <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-        Ingredients (qty|unit|name|y/n|notes)
+        Ingredients (qty|unit|name|y/n|notes|exact/to_taste)
       </Text>
       <TextInput
         multiline
