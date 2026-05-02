@@ -6,13 +6,12 @@ import { BackButton } from '@/components/BackButton';
 import {
   getAiProvider,
   getAppearance,
-  getYoutubeApiKey,
   setAiProvider,
   type AiProvider,
-  setYoutubeApiKey,
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
@@ -21,16 +20,13 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
   const [aiProvider, setAiProviderState] = useState<AiProvider>('openai');
-  const [youtube, setYoutube] = useState('');
   const [storage, setStorage] = useState('—');
-  const [backupDraft, setBackupDraft] = useState('');
   const [dialog, setDialog] = useState<{
     title: string;
     message: string;
@@ -38,13 +34,11 @@ export default function SettingsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [provider, yt, bytes] = await Promise.all([
+      const [provider, bytes] = await Promise.all([
         getAiProvider(),
-        getYoutubeApiKey(),
         estimateAppStorageBytes(),
       ]);
       setAiProviderState(provider);
-      setYoutube(yt ?? '');
       setStorage(formatBytes(bytes));
     } catch {
       setStorage('Unavailable');
@@ -103,48 +97,6 @@ export default function SettingsScreen() {
             </Pressable>
           ))}
         </View>
-      </View>
-
-      <View>
-        <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, marginBottom: 6 }}>
-          YouTube Data API key (optional)
-        </Text>
-        <TextInput
-          value={youtube}
-          onChangeText={setYoutube}
-          placeholder="AIza..."
-          placeholderTextColor={colors.textSecondary}
-          autoCapitalize="none"
-          secureTextEntry
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 12,
-            padding: 12,
-            fontFamily: 'DMSans_400Regular',
-            color: colors.textPrimary,
-            backgroundColor: colors.surface,
-          }}
-        />
-        <Pressable
-          onPress={async () => {
-            await setYoutubeApiKey(youtube.trim());
-            setDialog({ title: 'Saved', message: 'YouTube key updated.' });
-          }}
-          style={{
-            marginTop: 10,
-            backgroundColor: colors.surface,
-            padding: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: colors.border,
-          }}
-        >
-          <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
-            Save YouTube key
-          </Text>
-        </Pressable>
       </View>
 
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
@@ -216,33 +168,29 @@ export default function SettingsScreen() {
           Export backup
         </Text>
       </Pressable>
-      <TextInput
-        value={backupDraft}
-        onChangeText={setBackupDraft}
-        placeholder="Paste backup JSON to restore"
-        placeholderTextColor={colors.textSecondary}
-        multiline
-        style={{
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          minHeight: 110,
-          textAlignVertical: 'top',
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textPrimary,
-          backgroundColor: colors.surface,
-        }}
-      />
       <Pressable
         onPress={async () => {
           try {
-            await restoreBackupJson(backupDraft);
+            const selected = await DocumentPicker.getDocumentAsync({
+              type: 'application/json',
+              multiple: false,
+              copyToCacheDirectory: true,
+            });
+            if (selected.canceled) {
+              return;
+            }
+            const file = selected.assets[0];
+            if (!file?.uri) {
+              throw new Error('No file selected');
+            }
+            const rawBackup = await FileSystem.readAsStringAsync(file.uri, {
+              encoding: FileSystem.EncodingType.UTF8,
+            });
+            await restoreBackupJson(rawBackup);
             const restoredAppearance = await getAppearance();
             if (restoredAppearance) {
               setMode(restoredAppearance);
             }
-            setBackupDraft('');
             await load();
             setDialog({
               title: 'Restore complete',
@@ -263,7 +211,7 @@ export default function SettingsScreen() {
         }}
       >
         <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-          Restore backup
+          Upload backup and restore
         </Text>
       </Pressable>
 
