@@ -54,13 +54,19 @@ describe('scaleForIngredient', () => {
 });
 
 describe('formatQuantity', () => {
-  it('uses numeric output', () => {
-    expect(formatQuantity(0.2, 'tsp')).toBe('0.2 tsp');
+  it('formats kitchen spoon and cup units as fractions', () => {
+    expect(formatQuantity(0.8, 'tsp')).toBe('3/4 tsp');
+    expect(formatQuantity(1.25, 'tbsp')).toBe('1 1/4 tbsp');
+    expect(formatQuantity(2, 'cup')).toBe('2 cup');
+  });
+
+  it('keeps numeric output for non-fractional units', () => {
+    expect(formatQuantity(12.5, 'g')).toBe('12.5 g');
   });
 });
 
 describe('renderStepInstruction', () => {
-  it('does not duplicate units when instruction already includes unit text', () => {
+  it('removes quantity placeholders from method text', () => {
     expect(
       renderStepInstruction(
         {
@@ -74,10 +80,10 @@ describe('renderStepInstruction', () => {
         4,
         2
       )
-    ).toBe('Add 50 g sugar and mix.');
+    ).toBe('Add sugar and mix.');
   });
 
-  it('keeps unit in replacement when instruction has only placeholder', () => {
+  it('keeps method readable when placeholder is standalone', () => {
     expect(
       renderStepInstruction(
         {
@@ -91,6 +97,6 @@ describe('renderStepInstruction', () => {
         2,
         4
       )
-    ).toBe('Whisk in 60 ml.');
+    ).toBe('Whisk in.');
   });
 });

@@ -5,14 +5,17 @@ import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
 import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeChatSheet';
 import {
   addCookLog,
+  createRecipeAdjustment,
   getRecipeById,
+  ignoreRecipeAdjustment,
+  listPendingRecipeAdjustments,
   getRecipeServingsOverride,
   setRecipeArchived,
   setRecipeFlags,
   setRecipeMainImage,
   setRecipeServingsOverride,
 } from '@/data/recipes';
-import type { Recipe } from '@/types/recipe';
+import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import {
   formatIngredientAmount,
   renderStepInstruction,
@@ -32,6 +35,7 @@ import {
   compressAndSaveMainRecipePhoto,
 } from '@/lib/media';
 import { getBundledAiKey } from '@/lib/aiConfig';
+import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
 import { newId } from '@/lib/id';
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -80,6 +84,7 @@ export default function RecipeDetailScreen() {
     message: string;
     actions: AppDialogAction[];
   } | null>(null);
+  const [pendingAdjustments, setPendingAdjustments] = useState<RecipeAdjustment[]>([]);
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
@@ -90,9 +95,10 @@ export default function RecipeDetailScreen() {
     if (seq !== loadSeqRef.current) return;
     if (r) {
       const maxServings = Math.max(12, Math.round(r.baseServings));
-      const [savedSecure, savedDb] = await Promise.all([
+      const [savedSecure, savedDb, pending] = await Promise.all([
         getRecipeSavedServings(r.id),
         getRecipeServingsOverride(r.id),
+        listPendingRecipeAdjustments(r.id),
       ]);
       if (seq !== loadSeqRef.current) return;
       const nextServings =
@@ -102,10 +108,12 @@ export default function RecipeDetailScreen() {
             ? normalizeServings(savedDb, maxServings)
           : normalizeServings(r.baseServings, maxServings);
       setServings(nextServings);
+      setPendingAdjustments(pending);
       setRecipe(r);
     } else {
       setRecipe(null);
       setServings(null);
+      setPendingAdjustments([]);
       setIsMissing(true);
     }
     setIsLoading(false);
@@ -178,18 +186,64 @@ export default function RecipeDetailScreen() {
   };
 
   const persistCookLog = async (photoUri?: string) => {
+    const cookLogId = newId();
+    const noteText = noteDraft.trim();
     await addCookLog({
-      id: newId(),
+      id: cookLogId,
       recipeId: recipe.id,
       cookedAt: new Date().toISOString(),
       photoUri,
-      notes: noteDraft.trim() || undefined,
+      notes: noteText || undefined,
       rating: ratingDraft ?? undefined,
       createdAt: new Date().toISOString(),
     });
+    let adjustmentId: string | undefined;
+    if (noteText) {
+      const net = await NetInfo.fetch();
+      if (net.isConnected) {
+        const provider = await getAiProvider();
+        const key = getBundledAiKey(provider);
+        if (key) {
+          try {
+            const suggestions = await suggestRecipeAdjustmentsFromCookNote({
+              recipe,
+              note: noteText,
+              provider,
+              apiKey: key,
+            });
+            const adjustment = await createRecipeAdjustment({
+              recipeId: recipe.id,
+              cookLogId,
+              suggestions,
+            });
+            adjustmentId = adjustment?.id;
+          } catch {
+            // Cook logs still save even if AI extraction fails.
+          }
+        }
+      }
+    }
     setNoteDraft('');
     setRatingDraft(null);
-    reload();
+    await reload();
+    if (adjustmentId) {
+      setDialog({
+        title: 'Suggested recipe updates',
+        message: 'We found note-based updates. Review and choose what to apply.',
+        actions: [
+          { label: 'Later' },
+          {
+            label: 'Ignore',
+            onPress: () => ignoreRecipeAdjustment(adjustmentId!),
+          },
+          {
+            label: 'Review',
+            variant: 'primary',
+            onPress: () => router.push(`/recipe/adjustments/${adjustmentId}`),
+          },
+        ],
+      });
+    }
   };
 
   const logCookFromLibrary = async () => {
@@ -777,6 +831,24 @@ export default function RecipeDetailScreen() {
                   </Pressable>
                 ))}
               </View>
+              {pendingAdjustments.length > 0 ? (
+                <Pressable
+                  onPress={() =>
+                    router.push(`/recipe/adjustments/${pendingAdjustments[0].id}`)
+                  }
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.primary,
+                    borderRadius: 12,
+                    backgroundColor: colors.primary + '1A',
+                    padding: 10,
+                  }}
+                >
+                  <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>
+                    Review pending updates ({pendingAdjustments.length})
+                  </Text>
+                </Pressable>
+              ) : null}
               <TextInput
                 placeholder="Notes for this cook (optional)"
                 placeholderTextColor={colors.textSecondary}

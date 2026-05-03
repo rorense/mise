@@ -5,6 +5,9 @@ import type {
   CookLog,
   Ingredient,
   IngredientAmountMode,
+  RecipeAdjustment,
+  RecipeAdjustmentStatus,
+  RecipeAdjustmentSuggestion,
   Recipe,
   RecipeListItem,
   SourceType,
@@ -58,6 +61,16 @@ type CookLogRow = {
   created_at: string;
 };
 
+type RecipeAdjustmentRow = {
+  id: string;
+  recipe_id: string;
+  cook_log_id: string;
+  status: RecipeAdjustmentStatus;
+  suggestions_json: string;
+  created_at: string;
+  applied_at: string | null;
+};
+
 function mapIngredient(r: IngredientRow): Ingredient {
   return {
     id: r.id,
@@ -95,6 +108,29 @@ function mapCookLog(r: CookLogRow): CookLog {
     notes: r.notes ?? undefined,
     rating: r.rating ?? undefined,
     createdAt: r.created_at,
+  };
+}
+
+function parseRecipeAdjustmentSuggestions(
+  json: string
+): RecipeAdjustmentSuggestion[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? (parsed as RecipeAdjustmentSuggestion[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapRecipeAdjustment(r: RecipeAdjustmentRow): RecipeAdjustment {
+  return {
+    id: r.id,
+    recipeId: r.recipe_id,
+    cookLogId: r.cook_log_id,
+    status: r.status,
+    suggestions: parseRecipeAdjustmentSuggestions(r.suggestions_json),
+    createdAt: r.created_at,
+    appliedAt: r.applied_at ?? undefined,
   };
 }
 
@@ -439,6 +475,146 @@ export async function addCookLog(entry: CookLog): Promise<void> {
     'UPDATE recipes SET updated_at = ?, want_to_cook = 0 WHERE id = ?',
     [new Date().toISOString(), entry.recipeId]
   );
+}
+
+export async function createRecipeAdjustment(args: {
+  recipeId: string;
+  cookLogId: string;
+  suggestions: RecipeAdjustmentSuggestion[];
+}): Promise<RecipeAdjustment | null> {
+  if (args.suggestions.length === 0) return null;
+  const db = await getDatabase();
+  const createdAt = new Date().toISOString();
+  const id = newId();
+  await db.runAsync(
+    `INSERT INTO recipe_adjustments (id, recipe_id, cook_log_id, status, suggestions_json, created_at, applied_at)
+     VALUES (?, ?, ?, 'pending', ?, ?, NULL)`,
+    [
+      id,
+      args.recipeId,
+      args.cookLogId,
+      JSON.stringify(args.suggestions),
+      createdAt,
+    ]
+  );
+  await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
+    createdAt,
+    args.recipeId,
+  ]);
+  return {
+    id,
+    recipeId: args.recipeId,
+    cookLogId: args.cookLogId,
+    status: 'pending',
+    suggestions: args.suggestions,
+    createdAt,
+  };
+}
+
+export async function getRecipeAdjustmentById(
+  id: string
+): Promise<RecipeAdjustment | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<RecipeAdjustmentRow>(
+    'SELECT * FROM recipe_adjustments WHERE id = ?',
+    [id]
+  );
+  return row ? mapRecipeAdjustment(row) : null;
+}
+
+export async function listPendingRecipeAdjustments(
+  recipeId: string
+): Promise<RecipeAdjustment[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<RecipeAdjustmentRow>(
+    `SELECT * FROM recipe_adjustments
+     WHERE recipe_id = ? AND status = 'pending'
+     ORDER BY created_at DESC`,
+    [recipeId]
+  );
+  return rows.map(mapRecipeAdjustment);
+}
+
+export async function ignoreRecipeAdjustment(id: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE recipe_adjustments
+     SET status = 'ignored'
+     WHERE id = ? AND status = 'pending'`,
+    [id]
+  );
+}
+
+function applySuggestionToDraft(
+  draft: Omit<Recipe, 'cookLogs'>,
+  suggestion: RecipeAdjustmentSuggestion
+): void {
+  if (suggestion.type === 'ingredient_quantity') {
+    draft.ingredients = draft.ingredients.map((ing) =>
+      ing.id === suggestion.ingredientId
+        ? { ...ing, quantity: suggestion.nextQuantity }
+        : ing
+    );
+    return;
+  }
+  if (suggestion.type === 'ingredient_amount_mode') {
+    draft.ingredients = draft.ingredients.map((ing) => {
+      if (ing.id !== suggestion.ingredientId) return ing;
+      if (suggestion.nextAmountMode === 'to_taste') {
+        return {
+          ...ing,
+          amountMode: 'to_taste',
+          quantity: 0,
+          unit: null,
+          scalable: false,
+        };
+      }
+      return {
+        ...ing,
+        amountMode: 'exact',
+        scalable: suggestion.nextScalable,
+      };
+    });
+    return;
+  }
+  draft.steps = draft.steps.map((step) =>
+    step.id === suggestion.stepId
+      ? { ...step, instruction: suggestion.nextInstruction }
+      : step
+  );
+}
+
+export async function applyRecipeAdjustment(args: {
+  adjustmentId: string;
+  selectedSuggestionIds: string[];
+}): Promise<boolean> {
+  const adjustment = await getRecipeAdjustmentById(args.adjustmentId);
+  if (!adjustment || adjustment.status !== 'pending') return false;
+  const recipe = await getRecipeById(adjustment.recipeId);
+  if (!recipe) return false;
+  const selected = adjustment.suggestions.filter((suggestion) =>
+    args.selectedSuggestionIds.includes(suggestion.id)
+  );
+
+  if (selected.length === 0) {
+    await ignoreRecipeAdjustment(adjustment.id);
+    return true;
+  }
+
+  const { cookLogs: _cookLogs, ...draft } = recipe;
+  for (const suggestion of selected) {
+    applySuggestionToDraft(draft, suggestion);
+  }
+  await saveRecipe(draft);
+  const now = new Date().toISOString();
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE recipe_adjustments
+     SET status = 'applied', applied_at = ?
+     WHERE id = ? AND status = 'pending'`,
+    [now, adjustment.id]
+  );
+  return true;
 }
 
 export async function deleteCookLog(id: string): Promise<void> {

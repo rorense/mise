@@ -10,16 +10,16 @@ const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified J
   "cuisine": string | null,
   "tags": string[],
   "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean, "amountMode": "exact" | "to_taste" }[],
-  "steps": { "instruction": string, "scalableQuantities": { "placeholder": string, "baseQuantity": number, "unit": string }[] }[]
+  "steps": { "instruction": string, "scalableQuantities"?: { "placeholder": string, "baseQuantity": number, "unit": string }[] }[]
 }
 
 Rules:
 - All measurements MUST be metric only: g, kg, ml, l, cm, °C, tsp, tbsp, pinch. Never use imperial.
 - Convert all amounts to metric in the numbers you output.
-- Each step "instruction" must include placeholders like {{qty_1}} for every scalable quantity in that step, and scalableQuantities must define each placeholder with baseQuantity at baseServings.
+- Step instructions should be plain language without quantity placeholders.
 - For eggs, cloves, sprigs use unit null and round-friendly base quantities; set scalable true unless item is salt, baking powder, yeast, or spice — then scalable false.
 - Use amountMode "to_taste" when an ingredient is by feel (e.g., salt, pepper, chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
-- If a step has no numeric amount, scalableQuantities can be [] and instruction is plain text.
+- Set scalableQuantities to [] for each step unless placeholders are already present in source text.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -67,8 +67,9 @@ function parseSteps(raw: unknown): Step[] | null {
     const instruction =
       typeof row.instruction === 'string' ? row.instruction : null;
     if (!instruction) return null;
-    const sqRaw = row.scalableQuantities;
-    if (!Array.isArray(sqRaw)) return null;
+    const sqRaw = Array.isArray(row.scalableQuantities)
+      ? row.scalableQuantities
+      : [];
     const scalableQuantities: Step['scalableQuantities'] = [];
     for (const q of sqRaw) {
       if (!isRecord(q)) return null;
@@ -87,17 +88,6 @@ function parseSteps(raw: unknown): Step[] | null {
     });
   }
   return out;
-}
-
-function validateStepPlaceholders(steps: Step[]): boolean {
-  for (const step of steps) {
-    for (const sq of step.scalableQuantities) {
-      if (!step.instruction.includes(sq.placeholder)) {
-        return false;
-      }
-    }
-  }
-  return true;
 }
 
 export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
@@ -121,7 +111,6 @@ export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
   const ingredients = parseIngredients(data.ingredients);
   const steps = parseSteps(data.steps);
   if (!ingredients || !steps) return null;
-  if (!validateStepPlaceholders(steps)) return null;
   const now = new Date().toISOString();
   return {
     id: newId(),

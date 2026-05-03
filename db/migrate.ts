@@ -78,6 +78,21 @@ const MIGRATIONS: Record<number, string> = {
   6: `
     ALTER TABLE ingredients ADD COLUMN amount_mode TEXT NOT NULL DEFAULT 'exact' CHECK(amount_mode IN ('exact','to_taste'));
   `,
+  7: `
+    CREATE TABLE IF NOT EXISTS recipe_adjustments (
+      id TEXT PRIMARY KEY NOT NULL,
+      recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+      cook_log_id TEXT NOT NULL REFERENCES cook_logs(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'applied', 'ignored')),
+      suggestions_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      applied_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_recipe_adjustments_recipe_status
+      ON recipe_adjustments(recipe_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_recipe_adjustments_cook_log
+      ON recipe_adjustments(cook_log_id);
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {

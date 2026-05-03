@@ -36,6 +36,51 @@ export interface CookLog {
   createdAt: string;
 }
 
+export type RecipeAdjustmentStatus = 'pending' | 'applied' | 'ignored';
+
+type RecipeAdjustmentSuggestionBase = {
+  id: string;
+  confidence: number;
+  reason: string;
+  noteEvidence: string;
+};
+
+export type IngredientQuantityAdjustmentSuggestion =
+  RecipeAdjustmentSuggestionBase & {
+    type: 'ingredient_quantity';
+    ingredientId: string;
+    nextQuantity: number;
+  };
+
+export type IngredientAmountModeAdjustmentSuggestion =
+  RecipeAdjustmentSuggestionBase & {
+    type: 'ingredient_amount_mode';
+    ingredientId: string;
+    nextAmountMode: IngredientAmountMode;
+    nextScalable: boolean;
+  };
+
+export type StepInstructionAdjustmentSuggestion = RecipeAdjustmentSuggestionBase & {
+  type: 'step_instruction';
+  stepId: string;
+  nextInstruction: string;
+};
+
+export type RecipeAdjustmentSuggestion =
+  | IngredientQuantityAdjustmentSuggestion
+  | IngredientAmountModeAdjustmentSuggestion
+  | StepInstructionAdjustmentSuggestion;
+
+export interface RecipeAdjustment {
+  id: string;
+  recipeId: string;
+  cookLogId: string;
+  status: RecipeAdjustmentStatus;
+  suggestions: RecipeAdjustmentSuggestion[];
+  createdAt: string;
+  appliedAt?: string;
+}
+
 export interface Recipe {
   id: string;
   title: string;

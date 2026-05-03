@@ -34,35 +34,101 @@ function escapeRegExp(value: string): string {
 }
 
 function formatNumericQuantity(quantity: number): string {
-  if (Number.isInteger(quantity)) {
-    return String(quantity);
+  if (Math.abs(quantity - Math.round(quantity)) < Number.EPSILON) {
+    return String(Math.round(quantity));
   }
   return String(Number(quantity.toFixed(2)));
 }
 
-function hasUnitAdjacentToPlaceholder(
+const KITCHEN_FRACTION_DENOMINATORS = [2, 3, 4, 8];
+const FRACTIONAL_DISPLAY_UNITS = new Set(['tsp', 'tbsp', 'cup']);
+
+function normalizeUnit(unit: string | null): string | null {
+  if (!unit) return null;
+  const normalizedUnit = unit.trim().toLowerCase();
+  for (const [canonical, aliases] of Object.entries(UNIT_ALIASES)) {
+    if (aliases.includes(normalizedUnit)) return canonical;
+  }
+  return normalizedUnit || null;
+}
+
+function gcd(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y !== 0) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x || 1;
+}
+
+function toKitchenFraction(quantity: number): string {
+  const sign = quantity < 0 ? '-' : '';
+  const abs = Math.abs(quantity);
+  const whole = Math.floor(abs);
+  const frac = abs - whole;
+  if (frac < Number.EPSILON) return `${sign}${whole}`;
+
+  let bestNumerator = 0;
+  let bestDenominator = 1;
+  let bestError = Number.POSITIVE_INFINITY;
+  for (const denominator of KITCHEN_FRACTION_DENOMINATORS) {
+    const numerator = Math.round(frac * denominator);
+    const error = Math.abs(frac - numerator / denominator);
+    if (error < bestError) {
+      bestError = error;
+      bestNumerator = numerator;
+      bestDenominator = denominator;
+    }
+  }
+
+  let nextWhole = whole;
+  let numerator = bestNumerator;
+  let denominator = bestDenominator;
+  if (numerator === denominator) {
+    nextWhole += 1;
+    numerator = 0;
+  }
+  if (numerator === 0) return `${sign}${nextWhole}`;
+
+  const divisor = gcd(numerator, denominator);
+  numerator /= divisor;
+  denominator /= divisor;
+
+  if (nextWhole === 0) return `${sign}${numerator}/${denominator}`;
+  return `${sign}${nextWhole} ${numerator}/${denominator}`;
+}
+
+function stripPlaceholderAndUnit(
   instruction: string,
   placeholder: string,
   unit: string
-): boolean {
+): string {
+  let next = instruction.split(placeholder).join(' ');
   const normalizedUnit = unit.trim().toLowerCase();
-  if (!normalizedUnit) return false;
-  const aliases = UNIT_ALIASES[normalizedUnit] ?? [normalizedUnit];
-  const escapedPlaceholder = escapeRegExp(placeholder);
-  const separatorPattern = String.raw`[\s\-–—(){}\[\],.:;]*`;
+  if (normalizedUnit) {
+    const aliases = UNIT_ALIASES[normalizedUnit] ?? [normalizedUnit];
+    for (const alias of aliases) {
+      const escaped = escapeRegExp(alias);
+      const standaloneUnit = new RegExp(
+        String.raw`(^|[\s([{,])${escaped}(?=$|[\s)\]}.,;:!?])`,
+        'gi'
+      );
+      next = next.replace(standaloneUnit, '$1');
+    }
+  }
+  return next;
+}
 
-  return aliases.some((alias) => {
-    const token = escapeRegExp(alias);
-    const afterPattern = new RegExp(
-      `${escapedPlaceholder}${separatorPattern}${token}(?=$|\\s|[\\],.:;!?])`,
-      'i'
-    );
-    const beforePattern = new RegExp(
-      `(^|\\s|[\\[(,])${token}${separatorPattern}${escapedPlaceholder}`,
-      'i'
-    );
-    return afterPattern.test(instruction) || beforePattern.test(instruction);
-  });
+function cleanInstructionSpacing(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\{\s*\}/g, '')
+    .trim();
 }
 
 export function scaleQuantity(
@@ -71,8 +137,7 @@ export function scaleQuantity(
   currentServings: number
 ): number {
   if (baseServings <= 0) return baseQty;
-  const raw = (baseQty / baseServings) * currentServings;
-  return Math.round(raw * 10) / 10;
+  return (baseQty / baseServings) * currentServings;
 }
 
 export function scaleForIngredient(
@@ -97,7 +162,11 @@ export function formatQuantity(
   quantity: number,
   unit: string | null
 ): string {
-  const rounded = formatNumericQuantity(quantity);
+  const canonicalUnit = normalizeUnit(unit);
+  const rounded =
+    canonicalUnit && FRACTIONAL_DISPLAY_UNITS.has(canonicalUnit)
+      ? toKitchenFraction(quantity)
+      : formatNumericQuantity(quantity);
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
@@ -115,22 +184,17 @@ export function formatIngredientAmount(
 
 export function renderStepInstruction(
   step: Step,
-  baseServings: number,
-  currentServings: number
+  _baseServings: number,
+  _currentServings: number
 ): string {
   let text = step.instruction;
   for (const sq of step.scalableQuantities) {
-    const scaled =
-      Math.round(scaleQuantity(sq.baseQuantity, baseServings, currentServings) * 10) /
-      10;
-    const hasAdjacentUnit =
-      !!sq.unit && hasUnitAdjacentToPlaceholder(text, sq.placeholder, sq.unit);
-    const replacement = hasAdjacentUnit
-      ? formatNumericQuantity(scaled)
-      : formatQuantity(scaled, sq.unit || null);
-    text = text.split(sq.placeholder).join(replacement);
+    const shouldStripUnit = !!sq.unit;
+    text = shouldStripUnit
+      ? stripPlaceholderAndUnit(text, sq.placeholder, sq.unit)
+      : text.split(sq.placeholder).join(' ');
   }
-  return text;
+  return cleanInstructionSpacing(text);
 }
 
 export function buildChatIngredientLines(

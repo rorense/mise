@@ -632,7 +632,7 @@ export default function RecipeFormScreen() {
                   multiline
                   value={item.instruction}
                   onChangeText={(text) => updateStepInstruction(item.id, text)}
-                  placeholder="Describe the step. Use {{qty_1}} placeholders if needed."
+                  placeholder="Describe the step."
                   placeholderTextColor={colors.textSecondary}
                   style={{
                     minHeight: 80,
