@@ -188,7 +188,11 @@ export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
   if (ingredient.amountMode !== 'exact') return false;
   if (ingredient.quantity > 0) return false;
   if (ingredient.unit) return false;
-  if (/\d/.test(name)) return false;
+  const hasDigits = /\d/.test(name);
+  const looksLikeNumberedHeading =
+    /^\d+\s*[\).:-]/.test(name) ||
+    /^(step|part|section)\s*\d+\b/i.test(name);
+  if (hasDigits && !looksLikeNumberedHeading) return false;
   if (/to taste/i.test(name)) return false;
   return true;
 }

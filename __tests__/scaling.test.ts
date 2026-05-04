@@ -150,6 +150,33 @@ describe('splitIngredientSections', () => {
       { title: 'Simple Syrup', ingredients: [ingredients[3]] },
     ]);
   });
+
+  it('treats numbered heading rows as section titles', () => {
+    const ingredients: Ingredient[] = [
+      {
+        id: 'h1',
+        quantity: 0,
+        unit: null,
+        name: '1. Broth Base',
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: 0,
+      },
+      {
+        id: 'i1',
+        quantity: 1500,
+        unit: 'g',
+        name: 'pork spare ribs',
+        scalable: true,
+        amountMode: 'exact',
+        sortOrder: 1,
+      },
+    ];
+
+    expect(splitIngredientSections(ingredients)).toEqual([
+      { title: '1. Broth Base', ingredients: [ingredients[1]] },
+    ]);
+  });
 });
 
 describe('buildChatIngredientLines', () => {

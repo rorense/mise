@@ -151,4 +151,48 @@ describe('parseRecipeJson ingredient components', () => {
       amountMode: 'exact',
     });
   });
+
+  it('preserves numbered heading rows from model output', () => {
+    const parsed = parseRecipeJson(
+      JSON.stringify({
+        title: 'Nilagang Baboy',
+        baseServings: 5,
+        cuisine: 'filipino',
+        tags: ['soup'],
+        ingredients: [
+          {
+            quantity: 0,
+            unit: null,
+            name: '1. Broth Base',
+            notes: null,
+            scalable: false,
+            amountMode: 'exact',
+          },
+          {
+            quantity: 1.5,
+            unit: 'kg',
+            name: 'pork spare ribs',
+            notes: null,
+            scalable: true,
+            amountMode: 'exact',
+          },
+        ],
+        steps: [{ instruction: 'Simmer until tender.' }],
+      })
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.ingredients[0]).toMatchObject({
+      quantity: 0,
+      unit: null,
+      name: '1. Broth Base',
+      scalable: false,
+      amountMode: 'exact',
+    });
+    expect(parsed?.ingredients[1]).toMatchObject({
+      quantity: 1.5,
+      unit: 'kg',
+      name: 'pork spare ribs',
+    });
+  });
 });

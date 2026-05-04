@@ -91,6 +91,18 @@ function parseInlineIngredientText(text: string): {
   return { quantity, unit, name: rest };
 }
 
+function isLikelySectionHeadingName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (/to taste/i.test(trimmed)) return false;
+  const hasDigits = /\d/.test(trimmed);
+  const looksLikeNumberedHeading =
+    /^\d+\s*[\).:-]/.test(trimmed) ||
+    /^(step|part|section)\s*\d+\b/i.test(trimmed);
+  if (hasDigits && !looksLikeNumberedHeading) return false;
+  return true;
+}
+
 function parseIngredients(raw: unknown): Ingredient[] | null {
   if (!Array.isArray(raw)) return null;
   const out: Ingredient[] = [];
@@ -124,9 +136,7 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
     const looksLikeSectionHeading =
       quantityRaw !== null &&
       !unit &&
-      !/\d/.test(rawName) &&
-      !/to taste/i.test(rawName) &&
-      /^[^\d]+$/.test(rawName) &&
+      isLikelySectionHeadingName(rawName) &&
       quantityRaw <= 0;
     if (quantityRaw === null) return null;
     const quantity = looksLikeSectionHeading ? 0 : quantityRaw;
