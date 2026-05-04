@@ -46,8 +46,6 @@ import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers'
 import {
   ensureTimerNotificationPermission,
   presentTimerDoneNotification,
-  registerTimerNotificationActionListener,
-  syncActiveTimerNotification,
 } from '@/lib/timerNotifications';
 import {
   KEYBOARD_AVOIDING_BEHAVIOR,
@@ -157,36 +155,6 @@ export default function RecipeDetailScreen() {
   );
 
   useEffect(() => {
-    return registerTimerNotificationActionListener((action) => {
-      setActiveTimer((current) => {
-        if (!current) return current;
-        if (action === 'stop') return null;
-        if (action === 'pause') {
-          if (current.isPaused) return current;
-          const remainingSeconds = current.endsAtMs
-            ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
-            : current.remainingSeconds;
-          return {
-            ...current,
-            remainingSeconds,
-            isPaused: true,
-            endsAtMs: null,
-          };
-        }
-        if (action === 'resume') {
-          if (!current.isPaused) return current;
-          return {
-            ...current,
-            isPaused: false,
-            endsAtMs: Date.now() + current.remainingSeconds * 1000,
-          };
-        }
-        return current;
-      });
-    });
-  }, []);
-
-  useEffect(() => {
     if (!activeTimer || activeTimer.isPaused || !activeTimer.endsAtMs) return;
     const handle = setInterval(() => {
       setActiveTimer((current) => {
@@ -213,26 +181,6 @@ export default function RecipeDetailScreen() {
     }, 250);
     return () => clearInterval(handle);
   }, [activeTimer, setDialog]);
-
-  useEffect(() => {
-    if (!activeTimer) {
-      void syncActiveTimerNotification(null);
-      return;
-    }
-    const shouldRefreshNotification =
-      activeTimer.isPaused ||
-      activeTimer.remainingSeconds <= 60 ||
-      activeTimer.remainingSeconds % 5 === 0;
-    if (shouldRefreshNotification) {
-      void syncActiveTimerNotification(activeTimer);
-    }
-  }, [activeTimer]);
-
-  useEffect(() => {
-    return () => {
-      void syncActiveTimerNotification(null);
-    };
-  }, []);
 
   const startStepTimer = useCallback(async (stepId: string, label: string, seconds: number) => {
     if (!hasRequestedNotificationPermissionRef.current) {

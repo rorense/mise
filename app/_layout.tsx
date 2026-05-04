@@ -11,10 +11,7 @@ import {
   ThemeProvider as NavigationThemeProvider,
 } from '@react-navigation/native';
 import { getDatabase } from '@/db/client';
-import {
-  configureGlobalNotificationHandler,
-  configureTimerNotifications,
-} from '@/lib/timerNotifications';
+import { configureGlobalNotificationHandler } from '@/lib/timerNotifications';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -132,7 +129,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     void configureGlobalNotificationHandler();
-    void configureTimerNotifications();
   }, []);
 
   useEffect(() => {
