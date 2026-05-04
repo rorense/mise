@@ -182,19 +182,40 @@ export function formatIngredientAmount(
   return formatQuantity(quantity, ingredient.unit);
 }
 
+function looksLikeTitleCaseHeading(name: string): boolean {
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  let uppercaseWordCount = 0;
+  for (const word of words) {
+    const lettersOnly = word.replace(/[^A-Za-z]/g, '');
+    if (!lettersOnly) continue;
+    const startsUppercase = /^[A-Z]/.test(lettersOnly);
+    if (startsUppercase) uppercaseWordCount += 1;
+  }
+  return uppercaseWordCount >= 2;
+}
+
+export function isLikelySectionHeadingLabel(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (/to taste/i.test(trimmed)) return false;
+  const looksLikeNumberedHeading =
+    /^\d+\s*[\).:-]/.test(trimmed) ||
+    /^(step|part|section)\s*\d+\b/i.test(trimmed);
+  if (looksLikeNumberedHeading) return true;
+  if (/[:\-–—]\s*$/.test(trimmed)) return true;
+  if (/^for\b/i.test(trimmed)) return true;
+  if (looksLikeTitleCaseHeading(trimmed)) return true;
+  return false;
+}
+
 export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
   const name = ingredient.name.trim();
   if (!name) return false;
   if (ingredient.amountMode !== 'exact') return false;
   if (ingredient.quantity > 0) return false;
   if (ingredient.unit) return false;
-  const hasDigits = /\d/.test(name);
-  const looksLikeNumberedHeading =
-    /^\d+\s*[\).:-]/.test(name) ||
-    /^(step|part|section)\s*\d+\b/i.test(name);
-  if (hasDigits && !looksLikeNumberedHeading) return false;
-  if (/to taste/i.test(name)) return false;
-  return true;
+  return isLikelySectionHeadingLabel(name);
 }
 
 function normalizeSectionTitle(raw: string): string {

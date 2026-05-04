@@ -195,4 +195,45 @@ describe('parseRecipeJson ingredient components', () => {
       name: 'pork spare ribs',
     });
   });
+
+  it('keeps zero-quantity ingredients as ingredients without heading cues', () => {
+    const parsed = parseRecipeJson(
+      JSON.stringify({
+        title: 'Simple Soup',
+        baseServings: 2,
+        cuisine: null,
+        tags: ['soup'],
+        ingredients: [
+          {
+            quantity: 0,
+            unit: null,
+            name: 'salt',
+            notes: 'start with a small pinch',
+            scalable: false,
+            amountMode: 'exact',
+          },
+          {
+            quantity: 300,
+            unit: 'g',
+            name: 'potatoes',
+            notes: null,
+            scalable: true,
+            amountMode: 'exact',
+          },
+        ],
+        steps: [{ instruction: 'Simmer until tender.' }],
+      })
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.ingredients).toHaveLength(2);
+    expect(parsed?.ingredients[0]).toMatchObject({
+      quantity: 0,
+      unit: null,
+      name: 'salt',
+      notes: 'start with a small pinch',
+      scalable: false,
+      amountMode: 'exact',
+    });
+  });
 });

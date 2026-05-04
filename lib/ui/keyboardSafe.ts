@@ -8,8 +8,8 @@ import {
 
 export const KEYBOARD_VERTICAL_OFFSET = 72;
 
-export const KEYBOARD_AVOIDING_BEHAVIOR: 'padding' | 'height' =
-  Platform.OS === 'ios' ? 'padding' : 'height';
+export const KEYBOARD_AVOIDING_BEHAVIOR: 'padding' | undefined =
+  Platform.OS === 'ios' ? 'padding' : undefined;
 
 export function useKeyboardSafeScroll<T extends ScrollView>() {
   const scrollRef = useRef<T>(null);

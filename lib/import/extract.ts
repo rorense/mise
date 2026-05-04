@@ -1,6 +1,7 @@
 import { newId } from '@/lib/id';
 import { llmCompletion } from '@/lib/llm';
 import type { AiProvider } from '@/lib/secrets';
+import { isLikelySectionHeadingLabel } from '@/domain/scaling';
 import type { Ingredient, Recipe, SourceType, Step } from '@/types/recipe';
 
 const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified JSON matching this TypeScript shape (no markdown fences):
@@ -21,6 +22,7 @@ Rules:
 - Use amountMode "to_taste" when an ingredient is by feel (e.g., salt, pepper, chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
 - If ingredients are split into components/parts (e.g. "Sponge Cake", "Simple Syrup", "Whipping Cream"), set each ingredient item's "section" field to that component title.
 - If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
+- Do NOT turn an ingredient into a heading just because quantity is unknown/missing. If unsure, keep it as an ingredient row.
 - Set scalableQuantities to [] for each step unless placeholders are already present in source text.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
 
@@ -91,24 +93,13 @@ function parseInlineIngredientText(text: string): {
   return { quantity, unit, name: rest };
 }
 
-function isLikelySectionHeadingName(name: string): boolean {
-  const trimmed = name.trim();
-  if (!trimmed) return false;
-  if (/to taste/i.test(trimmed)) return false;
-  const hasDigits = /\d/.test(trimmed);
-  const looksLikeNumberedHeading =
-    /^\d+\s*[\).:-]/.test(trimmed) ||
-    /^(step|part|section)\s*\d+\b/i.test(trimmed);
-  if (hasDigits && !looksLikeNumberedHeading) return false;
-  return true;
-}
-
 function parseIngredients(raw: unknown): Ingredient[] | null {
   if (!Array.isArray(raw)) return null;
   const out: Ingredient[] = [];
   let sortOrder = 0;
   let activeSection: string | null = null;
-  for (const row of raw) {
+  for (let index = 0; index < raw.length; index += 1) {
+    const row = raw[index];
     if (!isRecord(row)) return null;
     const rawName = typeof row.name === 'string' ? row.name.trim() : '';
     if (!rawName) return null;
@@ -133,20 +124,31 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
       });
       activeSection = section;
     }
-    const looksLikeSectionHeading =
-      quantityRaw !== null &&
-      !unit &&
-      isLikelySectionHeadingName(rawName) &&
-      quantityRaw <= 0;
     if (quantityRaw === null) return null;
-    const quantity = looksLikeSectionHeading ? 0 : quantityRaw;
     const amountMode = row.amountMode === 'to_taste' ? 'to_taste' : 'exact';
     const looksLikeToTasteText =
       /to taste/i.test(rawName) || /to taste/i.test(notes ?? '');
     const resolvedAmountMode = looksLikeToTasteText ? 'to_taste' : amountMode;
+    const recoveredFromNotes =
+      typeof notes === 'string' ? parseInlineIngredientText(notes) : null;
+    const nextRow = index + 1 < raw.length ? raw[index + 1] : null;
+    const nextRowSection =
+      isRecord(nextRow) && typeof nextRow.section === 'string'
+        ? nextRow.section.trim()
+        : '';
+    const isReferencedByNextSection =
+      !!nextRowSection &&
+      nextRowSection.localeCompare(rawName, undefined, { sensitivity: 'accent' }) === 0;
+    const looksLikeSectionHeading =
+      quantityRaw <= 0 &&
+      !unit &&
+      resolvedAmountMode === 'exact' &&
+      row.scalable === false &&
+      (isLikelySectionHeadingLabel(rawName) ||
+        isReferencedByNextSection ||
+        recoveredFromNotes !== null);
+    const quantity = looksLikeSectionHeading ? 0 : quantityRaw;
     if (looksLikeSectionHeading) {
-      const recoveredFromNotes =
-        typeof notes === 'string' ? parseInlineIngredientText(notes) : null;
       if (rawName !== activeSection) {
         out.push({
           id: newId(),

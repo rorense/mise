@@ -113,6 +113,7 @@ export default function RecipeDetailScreen() {
     label: string;
     remainingSeconds: number;
     isPaused: boolean;
+    endsAtMs: number | null;
   } | null>(null);
   const hasRequestedNotificationPermissionRef = useRef(false);
   const AI_ENABLED = false;
@@ -160,19 +161,41 @@ export default function RecipeDetailScreen() {
       setActiveTimer((current) => {
         if (!current) return current;
         if (action === 'stop') return null;
-        if (action === 'pause') return { ...current, isPaused: true };
-        if (action === 'resume') return { ...current, isPaused: false };
+        if (action === 'pause') {
+          if (current.isPaused) return current;
+          const remainingSeconds = current.endsAtMs
+            ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
+            : current.remainingSeconds;
+          return {
+            ...current,
+            remainingSeconds,
+            isPaused: true,
+            endsAtMs: null,
+          };
+        }
+        if (action === 'resume') {
+          if (!current.isPaused) return current;
+          return {
+            ...current,
+            isPaused: false,
+            endsAtMs: Date.now() + current.remainingSeconds * 1000,
+          };
+        }
         return current;
       });
     });
   }, []);
 
   useEffect(() => {
-    if (!activeTimer || activeTimer.isPaused) return;
+    if (!activeTimer || activeTimer.isPaused || !activeTimer.endsAtMs) return;
     const handle = setInterval(() => {
       setActiveTimer((current) => {
-        if (!current) return null;
-        if (current.remainingSeconds <= 1) {
+        if (!current || current.isPaused || !current.endsAtMs) return current;
+        const remainingSeconds = Math.max(
+          0,
+          Math.ceil((current.endsAtMs - Date.now()) / 1000)
+        );
+        if (remainingSeconds <= 0) {
           void presentTimerDoneNotification(current.label);
           setDialog({
             title: 'Timer done',
@@ -181,12 +204,13 @@ export default function RecipeDetailScreen() {
           });
           return null;
         }
+        if (remainingSeconds === current.remainingSeconds) return current;
         return {
           ...current,
-          remainingSeconds: current.remainingSeconds - 1,
+          remainingSeconds,
         };
       });
-    }, 1000);
+    }, 250);
     return () => clearInterval(handle);
   }, [activeTimer, setDialog]);
 
@@ -197,8 +221,8 @@ export default function RecipeDetailScreen() {
     }
     const shouldRefreshNotification =
       activeTimer.isPaused ||
-      activeTimer.remainingSeconds <= 10 ||
-      activeTimer.remainingSeconds % 15 === 0;
+      activeTimer.remainingSeconds <= 60 ||
+      activeTimer.remainingSeconds % 5 === 0;
     if (shouldRefreshNotification) {
       void syncActiveTimerNotification(activeTimer);
     }
@@ -220,6 +244,7 @@ export default function RecipeDetailScreen() {
       label,
       remainingSeconds: seconds,
       isPaused: false,
+      endsAtMs: Date.now() + seconds * 1000,
     });
   }, []);
 
@@ -1320,9 +1345,25 @@ export default function RecipeDetailScreen() {
           </View>
           <Pressable
             onPress={() =>
-              setActiveTimer((current) =>
-                current ? { ...current, isPaused: !current.isPaused } : current
-              )
+              setActiveTimer((current) => {
+                if (!current) return current;
+                if (current.isPaused) {
+                  return {
+                    ...current,
+                    isPaused: false,
+                    endsAtMs: Date.now() + current.remainingSeconds * 1000,
+                  };
+                }
+                const remainingSeconds = current.endsAtMs
+                  ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
+                  : current.remainingSeconds;
+                return {
+                  ...current,
+                  remainingSeconds,
+                  isPaused: true,
+                  endsAtMs: null,
+                };
+              })
             }
           >
             <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>

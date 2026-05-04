@@ -177,6 +177,33 @@ describe('splitIngredientSections', () => {
       { title: '1. Broth Base', ingredients: [ingredients[1]] },
     ]);
   });
+
+  it('does not treat plain ingredient labels as section titles', () => {
+    const ingredients: Ingredient[] = [
+      {
+        id: 'i1',
+        quantity: 0,
+        unit: null,
+        name: 'salt',
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: 0,
+      },
+      {
+        id: 'i2',
+        quantity: 200,
+        unit: 'g',
+        name: 'potatoes',
+        scalable: true,
+        amountMode: 'exact',
+        sortOrder: 1,
+      },
+    ];
+
+    expect(splitIngredientSections(ingredients)).toEqual([
+      { title: null, ingredients },
+    ]);
+  });
 });
 
 describe('buildChatIngredientLines', () => {
