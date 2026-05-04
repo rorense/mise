@@ -93,6 +93,28 @@ const MIGRATIONS: Record<number, string> = {
     CREATE INDEX IF NOT EXISTS idx_recipe_adjustments_cook_log
       ON recipe_adjustments(cook_log_id);
   `,
+  8: `
+    CREATE TABLE IF NOT EXISTS recipe_versions (
+      id TEXT PRIMARY KEY NOT NULL,
+      recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_recipe_versions_recipe_created
+      ON recipe_versions(recipe_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS queued_ai_actions (
+      id TEXT PRIMARY KEY NOT NULL,
+      action_type TEXT NOT NULL CHECK(action_type IN ('cook_log_adjustment')),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_queued_ai_actions_created
+      ON queued_ai_actions(created_at ASC);
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {

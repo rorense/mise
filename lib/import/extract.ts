@@ -9,7 +9,7 @@ const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified J
   "baseServings": number,
   "cuisine": string | null,
   "tags": string[],
-  "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean, "amountMode": "exact" | "to_taste" }[],
+  "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean, "amountMode": "exact" | "to_taste", "section"?: string | null }[],
   "steps": { "instruction": string, "scalableQuantities"?: { "placeholder": string, "baseQuantity": number, "unit": string }[] }[]
 }
 
@@ -19,6 +19,8 @@ Rules:
 - Step instructions should be plain language without quantity placeholders.
 - For eggs, cloves, sprigs use unit null and round-friendly base quantities; set scalable true unless item is salt, baking powder, yeast, or spice — then scalable false.
 - Use amountMode "to_taste" when an ingredient is by feel (e.g., salt, pepper, chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
+- If ingredients are split into components/parts (e.g. "Sponge Cake", "Simple Syrup", "Whipping Cream"), set each ingredient item's "section" field to that component title.
+- If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
 - Set scalableQuantities to [] for each step unless placeholders are already present in source text.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
 
@@ -26,31 +28,154 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+function parseQuantityValue(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value) return null;
+  if (/^-?\d+(\.\d+)?$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const mixed = value.match(/^(-?\d+)\s+(\d+)\/(\d+)$/);
+  if (mixed) {
+    const whole = Number(mixed[1]);
+    const numerator = Number(mixed[2]);
+    const denominator = Number(mixed[3]);
+    if (denominator !== 0) {
+      const sign = whole < 0 ? -1 : 1;
+      const absWhole = Math.abs(whole);
+      return sign * (absWhole + numerator / denominator);
+    }
+  }
+  const fraction = value.match(/^(-?\d+)\/(\d+)$/);
+  if (fraction) {
+    const numerator = Number(fraction[1]);
+    const denominator = Number(fraction[2]);
+    if (denominator !== 0) {
+      return numerator / denominator;
+    }
+  }
+  const numericPrefix = value.match(/^-?\d+(\.\d+)?/);
+  if (numericPrefix) {
+    const parsed = Number(numericPrefix[0]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseInlineIngredientText(text: string): {
+  quantity: number;
+  unit: string | null;
+  name: string;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const qtyMatch = trimmed.match(
+    /^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)\s+(.+)$/
+  );
+  if (!qtyMatch) return null;
+  const quantity = parseQuantityValue(qtyMatch[1]);
+  if (quantity === null || quantity <= 0) return null;
+  let rest = qtyMatch[2].trim();
+  let unit: string | null = null;
+  if (/^batch(?:es)?\b/i.test(rest)) {
+    rest = rest
+      .replace(/^batch(?:es)?\s+of\s+/i, '')
+      .replace(/^batch(?:es)?\s+/i, '')
+      .trim();
+  }
+  if (!rest) return null;
+  return { quantity, unit, name: rest };
+}
+
 function parseIngredients(raw: unknown): Ingredient[] | null {
   if (!Array.isArray(raw)) return null;
   const out: Ingredient[] = [];
   let sortOrder = 0;
+  let activeSection: string | null = null;
   for (const row of raw) {
     if (!isRecord(row)) return null;
-    const quantity = Number(row.quantity);
-    const name = typeof row.name === 'string' ? row.name : null;
-    if (!Number.isFinite(quantity) || !name) return null;
-    const unit = row.unit === null || row.unit === undefined ? null : String(row.unit);
+    const rawName = typeof row.name === 'string' ? row.name.trim() : '';
+    if (!rawName) return null;
+    const quantityRaw = parseQuantityValue(row.quantity);
+    const unit = row.unit === null || row.unit === undefined ? null : String(row.unit).trim() || null;
     const notes =
       row.notes === null || row.notes === undefined
         ? undefined
         : String(row.notes);
+    const sectionRaw = typeof row.section === 'string' ? row.section.trim() : '';
+    const section = sectionRaw || null;
+    if (section && section !== activeSection) {
+      out.push({
+        id: newId(),
+        quantity: 0,
+        unit: null,
+        name: section,
+        notes: undefined,
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: sortOrder++,
+      });
+      activeSection = section;
+    }
+    const looksLikeSectionHeading =
+      quantityRaw !== null &&
+      !unit &&
+      !/\d/.test(rawName) &&
+      !/to taste/i.test(rawName) &&
+      /^[^\d]+$/.test(rawName) &&
+      quantityRaw <= 0;
+    if (quantityRaw === null) return null;
+    const quantity = looksLikeSectionHeading ? 0 : quantityRaw;
     const amountMode = row.amountMode === 'to_taste' ? 'to_taste' : 'exact';
     const looksLikeToTasteText =
-      /to taste/i.test(name) || /to taste/i.test(notes ?? '');
+      /to taste/i.test(rawName) || /to taste/i.test(notes ?? '');
     const resolvedAmountMode = looksLikeToTasteText ? 'to_taste' : amountMode;
+    if (looksLikeSectionHeading) {
+      const recoveredFromNotes =
+        typeof notes === 'string' ? parseInlineIngredientText(notes) : null;
+      if (rawName !== activeSection) {
+        out.push({
+          id: newId(),
+          quantity: 0,
+          unit: null,
+          name: rawName,
+          notes: undefined,
+          scalable: false,
+          amountMode: 'exact',
+          sortOrder: sortOrder++,
+        });
+      }
+      activeSection = rawName;
+      if (recoveredFromNotes) {
+        out.push({
+          id: newId(),
+          quantity: recoveredFromNotes.quantity,
+          unit: recoveredFromNotes.unit,
+          name: recoveredFromNotes.name,
+          notes: undefined,
+          scalable: true,
+          amountMode: 'exact',
+          sortOrder: sortOrder++,
+        });
+      }
+      continue;
+    }
     out.push({
       id: newId(),
       quantity: resolvedAmountMode === 'to_taste' ? 0 : quantity,
       unit: resolvedAmountMode === 'to_taste' ? null : unit,
-      name,
+      name: rawName,
       notes,
-      scalable: resolvedAmountMode === 'to_taste' ? false : row.scalable !== false,
+      scalable:
+        resolvedAmountMode === 'to_taste'
+          ? false
+          : looksLikeSectionHeading
+            ? false
+            : row.scalable !== false,
       amountMode: resolvedAmountMode,
       sortOrder: sortOrder++,
     });

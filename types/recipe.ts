@@ -81,6 +81,14 @@ export interface RecipeAdjustment {
   appliedAt?: string;
 }
 
+export interface RecipeVersion {
+  id: string;
+  recipeId: string;
+  label: string;
+  snapshotJson: string;
+  createdAt: string;
+}
+
 export interface Recipe {
   id: string;
   title: string;

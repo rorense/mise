@@ -8,6 +8,7 @@ import {
 } from '@/data/recipes';
 import { getOnboarded } from '@/lib/secrets';
 import { useTheme } from '@/theme/ThemeContext';
+import { drainOfflineAiQueue } from '@/lib/ai/offlineQueue';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useFocusEffect, useRouter } from 'expo-router';
@@ -74,7 +75,10 @@ export default function LibraryScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      reload();
+      void (async () => {
+        await drainOfflineAiQueue();
+        await reload();
+      })();
     }, [reload])
   );
 
@@ -296,7 +300,7 @@ export default function LibraryScreen() {
         >
           <Ionicons name="search" size={19} color={colors.textSecondary} />
           <TextInput
-            placeholder="Search title, ingredient, or tag"
+            placeholder='Search (e.g. has:chicken no:nuts is:favorite mins<30)'
             placeholderTextColor={colors.textSecondary}
             value={query}
             onChangeText={setQuery}

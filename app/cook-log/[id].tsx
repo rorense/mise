@@ -1,4 +1,9 @@
-import { deleteCookLog, getCookLogById } from '@/data/recipes';
+import {
+  deleteCookLogWithUndoData,
+  getCookLogById,
+  restoreDeletedCookLog,
+} from '@/data/recipes';
+import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
@@ -14,6 +19,10 @@ export default function CookLogScreen() {
   const [data, setData] = useState<Awaited<ReturnType<typeof getCookLogById>>>(null);
   const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [undoDialog, setUndoDialog] = useState(false);
+  const [deletedLog, setDeletedLog] = useState<Awaited<
+    ReturnType<typeof deleteCookLogWithUndoData>
+  > | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,7 +45,7 @@ export default function CookLogScreen() {
       <BackButton />
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
         {log.photoUri ? (
-          <Pressable onPress={() => setFullscreenImageUri(log.photoUri)}>
+          <Pressable onPress={() => setFullscreenImageUri(log.photoUri ?? null)}>
             <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
           </Pressable>
         ) : null}
@@ -74,7 +83,33 @@ export default function CookLogScreen() {
         onCancel={() => setShowDeleteConfirm(false)}
         onConfirm={async () => {
           setShowDeleteConfirm(false);
-          await deleteCookLog(log.id);
+          const removed = await deleteCookLogWithUndoData(log.id);
+          setDeletedLog(removed);
+          setUndoDialog(true);
+        }}
+      />
+      <AppDialog
+        visible={undoDialog}
+        title="Entry deleted"
+        message="You can undo this action now."
+        actions={[
+          {
+            label: 'Undo',
+            onPress: async () => {
+              if (deletedLog) {
+                await restoreDeletedCookLog(deletedLog);
+              }
+              router.back();
+            },
+          },
+          {
+            label: 'Done',
+            variant: 'primary',
+            onPress: () => router.back(),
+          },
+        ]}
+        onClose={() => {
+          setUndoDialog(false);
           router.back();
         }}
       />

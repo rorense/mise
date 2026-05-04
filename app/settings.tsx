@@ -1,4 +1,5 @@
 import { exportBackupJson, restoreBackupJson } from '@/data/backup';
+import { cleanupUnusedMediaFiles } from '@/data/recipes';
 import { getActiveAiProvider } from '@/lib/aiConfig';
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
 import { AppDialog } from '@/components/AppDialog';
@@ -128,6 +129,31 @@ export default function SettingsScreen() {
       <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
         Approximate document storage: {storage}
       </Text>
+      <Pressable
+        onPress={async () => {
+          const result = await cleanupUnusedMediaFiles();
+          await load();
+          setDialog({
+            title: 'Storage cleanup',
+            message:
+              result.deletedCount === 0
+                ? 'No unused photos found.'
+                : `Removed ${result.deletedCount} unused photo${result.deletedCount === 1 ? '' : 's'}.`,
+          });
+        }}
+        style={{
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 12,
+          padding: 12,
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
+          Cleanup unused photos
+        </Text>
+      </Pressable>
       <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
         Data backup
       </Text>

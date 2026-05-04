@@ -9,6 +9,7 @@ import type {
   RecipeAdjustmentStatus,
   RecipeAdjustmentSuggestion,
   Recipe,
+  RecipeVersion,
   RecipeListItem,
   SourceType,
   Step,
@@ -69,6 +70,25 @@ type RecipeAdjustmentRow = {
   suggestions_json: string;
   created_at: string;
   applied_at: string | null;
+};
+
+type RecipeVersionRow = {
+  id: string;
+  recipe_id: string;
+  label: string;
+  snapshot_json: string;
+  created_at: string;
+};
+
+type QueuedAiActionType = 'cook_log_adjustment';
+
+type QueuedAiActionRow = {
+  id: string;
+  action_type: QueuedAiActionType;
+  payload_json: string;
+  created_at: string;
+  attempts: number;
+  last_error: string | null;
 };
 
 function mapIngredient(r: IngredientRow): Ingredient {
@@ -134,6 +154,16 @@ function mapRecipeAdjustment(r: RecipeAdjustmentRow): RecipeAdjustment {
   };
 }
 
+function mapRecipeVersion(r: RecipeVersionRow): RecipeVersion {
+  return {
+    id: r.id,
+    recipeId: r.recipe_id,
+    label: r.label,
+    snapshotJson: r.snapshot_json,
+    createdAt: r.created_at,
+  };
+}
+
 async function loadTagsForRecipe(
   db: SQLite.SQLiteDatabase,
   recipeId: string
@@ -146,6 +176,64 @@ async function loadTagsForRecipe(
     [recipeId]
   );
   return rows.map((r) => r.name);
+}
+
+function toDraft(recipe: Recipe): Omit<Recipe, 'cookLogs'> {
+  const { cookLogs: _cookLogs, ...draft } = recipe;
+  return draft;
+}
+
+async function isUriReferenced(
+  db: SQLite.SQLiteDatabase,
+  uri: string
+): Promise<boolean> {
+  const recipeMain = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) as c FROM recipes WHERE main_image_uri = ?',
+    [uri]
+  );
+  const cookPhoto = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) as c FROM cook_logs WHERE photo_uri = ?',
+    [uri]
+  );
+  return (recipeMain?.c ?? 0) > 0 || (cookPhoto?.c ?? 0) > 0;
+}
+
+async function deleteUriIfUnreferenced(
+  db: SQLite.SQLiteDatabase,
+  uri: string | null | undefined
+): Promise<void> {
+  if (!uri) return;
+  const stillReferenced = await isUriReferenced(db, uri);
+  if (stillReferenced) return;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) {
+      await FileSystem.deleteAsync(uri);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function createRecipeVersionSnapshot(
+  db: SQLite.SQLiteDatabase,
+  recipeId: string,
+  label: string
+): Promise<void> {
+  const currentRecipe = await getRecipeById(recipeId);
+  if (!currentRecipe) return;
+  const versionId = newId();
+  await db.runAsync(
+    `INSERT INTO recipe_versions (id, recipe_id, label, snapshot_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      versionId,
+      recipeId,
+      label,
+      JSON.stringify(toDraft(currentRecipe)),
+      new Date().toISOString(),
+    ]
+  );
 }
 
 export async function getRecipeById(id: string): Promise<Recipe | null> {
@@ -218,14 +306,150 @@ export function getLibraryOrderBy(sort: LibrarySort): string {
   return `${pinned}, (last_cooked_at IS NULL) ASC, last_cooked_at DESC, r.updated_at DESC`;
 }
 
+export type SearchMinutesFilter = {
+  op: '<' | '<=' | '>' | '>=' | '=';
+  value: number;
+};
+
+export type ParsedSearchQuery = {
+  textTerms: string[];
+  includeIngredients: string[];
+  excludeIngredients: string[];
+  includeTags: string[];
+  excludeTags: string[];
+  includeCuisine: string[];
+  excludeCuisine: string[];
+  flags: {
+    favorite?: boolean;
+    wantToCook?: boolean;
+    archived?: boolean;
+    cooked?: boolean;
+  };
+  minutes?: SearchMinutesFilter;
+};
+
+function tokenizeSearchQuery(raw: string): string[] {
+  const tokens = raw.match(/"([^"]+)"|\S+/g) ?? [];
+  return tokens.map((token) =>
+    token.startsWith('"') && token.endsWith('"') ? token.slice(1, -1) : token
+  );
+}
+
+function parseMinutesFilter(token: string): SearchMinutesFilter | undefined {
+  const match = token.match(/^mins?(<=|>=|=|<|>)(\d+)$/i);
+  if (!match) return undefined;
+  return {
+    op: match[1] as SearchMinutesFilter['op'],
+    value: Number(match[2]),
+  };
+}
+
+export function parseSearchQuery(query: string): ParsedSearchQuery {
+  const parsed: ParsedSearchQuery = {
+    textTerms: [],
+    includeIngredients: [],
+    excludeIngredients: [],
+    includeTags: [],
+    excludeTags: [],
+    includeCuisine: [],
+    excludeCuisine: [],
+    flags: {},
+  };
+  for (const token of tokenizeSearchQuery(query.trim())) {
+    const lower = token.toLowerCase();
+    const minutes = parseMinutesFilter(lower);
+    if (minutes) {
+      parsed.minutes = minutes;
+      continue;
+    }
+    if (lower.startsWith('has:')) {
+      const value = token.slice(4).trim();
+      if (value) parsed.includeIngredients.push(value);
+      continue;
+    }
+    if (lower.startsWith('no:')) {
+      const value = token.slice(3).trim();
+      if (value) parsed.excludeIngredients.push(value);
+      continue;
+    }
+    if (lower.startsWith('tag:')) {
+      const value = token.slice(4).trim();
+      if (value) parsed.includeTags.push(value);
+      continue;
+    }
+    if (lower.startsWith('-tag:')) {
+      const value = token.slice(5).trim();
+      if (value) parsed.excludeTags.push(value);
+      continue;
+    }
+    if (lower.startsWith('cuisine:')) {
+      const value = token.slice(8).trim();
+      if (value) parsed.includeCuisine.push(value);
+      continue;
+    }
+    if (lower.startsWith('-cuisine:')) {
+      const value = token.slice(9).trim();
+      if (value) parsed.excludeCuisine.push(value);
+      continue;
+    }
+    if (lower === 'is:favorite') {
+      parsed.flags.favorite = true;
+      continue;
+    }
+    if (lower === 'is:want') {
+      parsed.flags.wantToCook = true;
+      continue;
+    }
+    if (lower === 'is:archived') {
+      parsed.flags.archived = true;
+      continue;
+    }
+    if (lower === 'is:cooked') {
+      parsed.flags.cooked = true;
+      continue;
+    }
+    if (lower === 'is:uncooked') {
+      parsed.flags.cooked = false;
+      continue;
+    }
+    parsed.textTerms.push(token);
+  }
+  return parsed;
+}
+
+export function estimateStepMinutes(instruction: string): number {
+  let total = 0;
+  let lower = instruction.toLowerCase();
+  const rangePattern = /(\d+)\s*-\s*(\d+)\s*(m|min|mins|minute|minutes)\b/g;
+  for (const match of lower.matchAll(rangePattern)) {
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      total += Math.round((start + end) / 2);
+    }
+  }
+  lower = lower.replace(rangePattern, ' ');
+  for (const match of lower.matchAll(/(\d+)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b/g)) {
+    const value = Number(match[1]);
+    const unit = match[2];
+    if (!Number.isFinite(value)) continue;
+    if (unit.startsWith('h')) {
+      total += value * 60;
+    } else {
+      total += value;
+    }
+  }
+  return total;
+}
+
 export async function listRecipeCards(
   query: string,
   filter: LibraryFilter,
   sort: LibrarySort
 ): Promise<RecipeListItem[]> {
   const db = await getDatabase();
-  const q = `%${query.trim().toLowerCase()}%`;
-  const hasQuery = query.trim().length > 0;
+  const parsedSearch = parseSearchQuery(query);
+  const hasTextTerms = parsedSearch.textTerms.length > 0;
 
   let sql = `
     SELECT
@@ -254,17 +478,72 @@ export async function listRecipeCards(
     sql += ` AND r.is_archived = 1`;
   }
 
-  if (hasQuery) {
-    sql += ` AND (
-      lower(r.title) LIKE ?
-      OR lower(ifnull(r.cuisine,'')) LIKE ?
-      OR EXISTS (SELECT 1 FROM ingredients i WHERE i.recipe_id = r.id AND lower(i.name) LIKE ?)
-      OR EXISTS (
-        SELECT 1 FROM recipe_tags rt2 JOIN tags t2 ON t2.id = rt2.tag_id
-        WHERE rt2.recipe_id = r.id AND lower(t2.name) LIKE ?
-      )
+  if (hasTextTerms) {
+    for (const term of parsedSearch.textTerms) {
+      const q = `%${term.trim().toLowerCase()}%`;
+      sql += ` AND (
+        lower(r.title) LIKE ?
+        OR lower(ifnull(r.cuisine,'')) LIKE ?
+        OR EXISTS (SELECT 1 FROM ingredients i WHERE i.recipe_id = r.id AND lower(i.name) LIKE ?)
+        OR EXISTS (
+          SELECT 1 FROM recipe_tags rt2 JOIN tags t2 ON t2.id = rt2.tag_id
+          WHERE rt2.recipe_id = r.id AND lower(t2.name) LIKE ?
+        )
+      )`;
+      params.push(q, q, q, q);
+    }
+  }
+
+  for (const term of parsedSearch.includeIngredients) {
+    sql += ` AND EXISTS (
+      SELECT 1 FROM ingredients i2
+      WHERE i2.recipe_id = r.id AND lower(i2.name) LIKE ?
     )`;
-    params.push(q, q, q, q);
+    params.push(`%${term.toLowerCase()}%`);
+  }
+  for (const term of parsedSearch.excludeIngredients) {
+    sql += ` AND NOT EXISTS (
+      SELECT 1 FROM ingredients i3
+      WHERE i3.recipe_id = r.id AND lower(i3.name) LIKE ?
+    )`;
+    params.push(`%${term.toLowerCase()}%`);
+  }
+  for (const tag of parsedSearch.includeTags) {
+    sql += ` AND EXISTS (
+      SELECT 1 FROM recipe_tags rt4 JOIN tags t4 ON t4.id = rt4.tag_id
+      WHERE rt4.recipe_id = r.id AND lower(t4.name) LIKE ?
+    )`;
+    params.push(`%${tag.toLowerCase()}%`);
+  }
+  for (const tag of parsedSearch.excludeTags) {
+    sql += ` AND NOT EXISTS (
+      SELECT 1 FROM recipe_tags rt5 JOIN tags t5 ON t5.id = rt5.tag_id
+      WHERE rt5.recipe_id = r.id AND lower(t5.name) LIKE ?
+    )`;
+    params.push(`%${tag.toLowerCase()}%`);
+  }
+  for (const cuisine of parsedSearch.includeCuisine) {
+    sql += ` AND lower(ifnull(r.cuisine, '')) LIKE ?`;
+    params.push(`%${cuisine.toLowerCase()}%`);
+  }
+  for (const cuisine of parsedSearch.excludeCuisine) {
+    sql += ` AND lower(ifnull(r.cuisine, '')) NOT LIKE ?`;
+    params.push(`%${cuisine.toLowerCase()}%`);
+  }
+  if (parsedSearch.flags.favorite) {
+    sql += ` AND r.is_favorite = 1`;
+  }
+  if (parsedSearch.flags.wantToCook) {
+    sql += ` AND r.want_to_cook = 1`;
+  }
+  if (parsedSearch.flags.archived !== undefined) {
+    sql += ` AND r.is_archived = ?`;
+    params.push(parsedSearch.flags.archived ? 1 : 0);
+  }
+  if (parsedSearch.flags.cooked === true) {
+    sql += ` AND EXISTS (SELECT 1 FROM cook_logs c6 WHERE c6.recipe_id = r.id)`;
+  } else if (parsedSearch.flags.cooked === false) {
+    sql += ` AND NOT EXISTS (SELECT 1 FROM cook_logs c7 WHERE c7.recipe_id = r.id)`;
   }
 
   if (filter.type === 'tag') {
@@ -301,8 +580,36 @@ export async function listRecipeCards(
     last_cooked_at: string | null;
   }>(sql, params);
 
+  let filteredRows = rows;
+  if (parsedSearch.minutes) {
+    const kept: typeof rows = [];
+    for (const row of rows) {
+      const stepRows = await db.getAllAsync<{ instruction: string }>(
+        'SELECT instruction FROM steps WHERE recipe_id = ? ORDER BY order_idx, id',
+        [row.id]
+      );
+      const minutes = stepRows.reduce(
+        (acc, stepRow) => acc + estimateStepMinutes(stepRow.instruction),
+        0
+      );
+      const value = parsedSearch.minutes.value;
+      const pass =
+        parsedSearch.minutes.op === '<'
+          ? minutes < value
+          : parsedSearch.minutes.op === '<='
+            ? minutes <= value
+          : parsedSearch.minutes.op === '>'
+            ? minutes > value
+            : parsedSearch.minutes.op === '>='
+              ? minutes >= value
+              : minutes === value;
+      if (pass) kept.push(row);
+    }
+    filteredRows = kept;
+  }
+
   const items: RecipeListItem[] = [];
-  for (const row of rows) {
+  for (const row of filteredRows) {
     const tags = await loadTagsForRecipe(db, row.id);
     items.push({
       id: row.id,
@@ -373,8 +680,15 @@ async function ensureTagIds(
 export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void> {
   const db = await getDatabase();
   const now = new Date().toISOString();
+  const existing = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM recipes WHERE id = ?',
+    [recipe.id]
+  );
   await db.execAsync('BEGIN IMMEDIATE');
   try {
+    if (existing) {
+      await createRecipeVersionSnapshot(db, recipe.id, 'Before edit');
+    }
     await db.runAsync(
       `INSERT INTO recipes (id, title, source_url, source_type, main_image_uri, base_servings, is_favorite, want_to_cook, is_archived, cuisine, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -511,6 +825,45 @@ export async function createRecipeAdjustment(args: {
   };
 }
 
+export async function enqueueCookLogAdjustmentTask(args: {
+  recipeId: string;
+  cookLogId: string;
+  note: string;
+}): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT INTO queued_ai_actions (id, action_type, payload_json, created_at, attempts, last_error)
+     VALUES (?, 'cook_log_adjustment', ?, ?, 0, NULL)`,
+    [newId(), JSON.stringify(args), new Date().toISOString()]
+  );
+}
+
+export async function listQueuedAiActions(): Promise<QueuedAiActionRow[]> {
+  const db = await getDatabase();
+  return db.getAllAsync<QueuedAiActionRow>(
+    `SELECT * FROM queued_ai_actions
+     ORDER BY created_at ASC`
+  );
+}
+
+export async function markQueuedAiActionAttempt(
+  actionId: string,
+  error: string
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE queued_ai_actions
+     SET attempts = attempts + 1, last_error = ?
+     WHERE id = ?`,
+    [error, actionId]
+  );
+}
+
+export async function deleteQueuedAiAction(actionId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM queued_ai_actions WHERE id = ?', [actionId]);
+}
+
 export async function getRecipeAdjustmentById(
   id: string
 ): Promise<RecipeAdjustment | null> {
@@ -617,29 +970,61 @@ export async function applyRecipeAdjustment(args: {
   return true;
 }
 
+export async function listRecipeVersions(recipeId: string): Promise<RecipeVersion[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<RecipeVersionRow>(
+    `SELECT * FROM recipe_versions
+     WHERE recipe_id = ?
+     ORDER BY created_at DESC`,
+    [recipeId]
+  );
+  return rows.map(mapRecipeVersion);
+}
+
+export async function restoreRecipeVersion(versionId: string): Promise<boolean> {
+  const db = await getDatabase();
+  const version = await db.getFirstAsync<RecipeVersionRow>(
+    'SELECT * FROM recipe_versions WHERE id = ?',
+    [versionId]
+  );
+  if (!version) return false;
+  let parsed: Omit<Recipe, 'cookLogs'>;
+  try {
+    parsed = JSON.parse(version.snapshot_json) as Omit<Recipe, 'cookLogs'>;
+  } catch {
+    return false;
+  }
+  await saveRecipe({ ...parsed, id: version.recipe_id });
+  return true;
+}
+
 export async function deleteCookLog(id: string): Promise<void> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<{
     recipe_id: string;
     photo_uri: string | null;
   }>('SELECT recipe_id, photo_uri FROM cook_logs WHERE id = ?', [id]);
-  if (row?.photo_uri) {
-    try {
-      const info = await FileSystem.getInfoAsync(row.photo_uri);
-      if (info.exists) {
-        await FileSystem.deleteAsync(row.photo_uri);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
   await db.runAsync('DELETE FROM cook_logs WHERE id = ?', [id]);
+  await deleteUriIfUnreferenced(db, row?.photo_uri);
   if (row) {
     await db.runAsync(
       'UPDATE recipes SET updated_at = ? WHERE id = ?',
       [new Date().toISOString(), row.recipe_id]
     );
   }
+}
+
+export async function deleteCookLogWithUndoData(
+  id: string
+): Promise<CookLog | null> {
+  const info = await getCookLogById(id);
+  if (!info) return null;
+  await deleteCookLog(id);
+  return info.log;
+}
+
+export async function restoreDeletedCookLog(log: CookLog): Promise<void> {
+  await addCookLog(log);
 }
 
 export async function deleteRecipe(id: string): Promise<void> {
@@ -652,28 +1037,11 @@ export async function deleteRecipe(id: string): Promise<void> {
     'SELECT main_image_uri FROM recipes WHERE id = ?',
     [id]
   );
-  for (const row of photos) {
-    if (!row.photo_uri) continue;
-    try {
-      const info = await FileSystem.getInfoAsync(row.photo_uri);
-      if (info.exists) {
-        await FileSystem.deleteAsync(row.photo_uri);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  if (main?.main_image_uri) {
-    try {
-      const info = await FileSystem.getInfoAsync(main.main_image_uri);
-      if (info.exists) {
-        await FileSystem.deleteAsync(main.main_image_uri);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
   await db.runAsync('DELETE FROM recipes WHERE id = ?', [id]);
+  for (const row of photos) {
+    await deleteUriIfUnreferenced(db, row.photo_uri);
+  }
+  await deleteUriIfUnreferenced(db, main?.main_image_uri);
 }
 
 export async function setRecipeFlags(
@@ -700,8 +1068,45 @@ export async function setRecipeFlags(
   );
 }
 
+export async function setRecipeTags(recipeId: string, tags: string[]): Promise<void> {
+  const db = await getDatabase();
+  const unique = Array.from(
+    new Map(
+      tags
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .map((tag) => [tag.toLowerCase(), tag] as const)
+    ).values()
+  );
+
+  await db.execAsync('BEGIN IMMEDIATE');
+  try {
+    await db.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipeId]);
+    const tagIds = await ensureTagIds(db, unique);
+    for (const tagId of tagIds) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
+        [recipeId, tagId]
+      );
+    }
+    await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
+      new Date().toISOString(),
+      recipeId,
+    ]);
+    await db.execAsync('COMMIT');
+  } catch (error) {
+    await db.execAsync('ROLLBACK');
+    throw error;
+  }
+}
+
 export async function setRecipeArchived(recipeId: string, archived: boolean): Promise<void> {
   const db = await getDatabase();
+  await createRecipeVersionSnapshot(
+    db,
+    recipeId,
+    archived ? 'Before archive' : 'Before unarchive'
+  );
   await db.runAsync(
     `UPDATE recipes
      SET is_archived = ?, updated_at = ?
@@ -755,15 +1160,60 @@ export async function setRecipeMainImage(
     [mainImageUri ?? null, new Date().toISOString(), recipeId]
   );
   if (previous && previous !== mainImageUri) {
-    try {
-      const info = await FileSystem.getInfoAsync(previous);
-      if (info.exists) {
-        await FileSystem.deleteAsync(previous);
+    await deleteUriIfUnreferenced(db, previous);
+  }
+}
+
+export async function setRecipeMainImageFromCookLog(
+  recipeId: string,
+  cookLogId: string
+): Promise<boolean> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ photo_uri: string | null }>(
+    'SELECT photo_uri FROM cook_logs WHERE id = ? AND recipe_id = ?',
+    [cookLogId, recipeId]
+  );
+  if (!row?.photo_uri) return false;
+  await setRecipeMainImage(recipeId, row.photo_uri);
+  return true;
+}
+
+export async function cleanupUnusedMediaFiles(): Promise<{
+  deletedCount: number;
+}> {
+  const db = await getDatabase();
+  const recipeUris = await db.getAllAsync<{ uri: string | null }>(
+    'SELECT main_image_uri as uri FROM recipes WHERE main_image_uri IS NOT NULL'
+  );
+  const cookUris = await db.getAllAsync<{ uri: string | null }>(
+    'SELECT photo_uri as uri FROM cook_logs WHERE photo_uri IS NOT NULL'
+  );
+  const active = new Set<string>();
+  for (const row of [...recipeUris, ...cookUris]) {
+    if (row.uri) active.add(row.uri);
+  }
+
+  const root = FileSystem.documentDirectory;
+  if (!root) return { deletedCount: 0 };
+  const candidateDirs = [`${root}cook-photos`, `${root}recipe-photos`];
+  let deletedCount = 0;
+  for (const dir of candidateDirs) {
+    const info = await FileSystem.getInfoAsync(dir);
+    if (!info.exists || !info.isDirectory) continue;
+    const names = await FileSystem.readDirectoryAsync(dir);
+    const prefix = dir.endsWith('/') ? dir : `${dir}/`;
+    for (const name of names) {
+      const uri = `${prefix}${name}`;
+      if (active.has(uri)) continue;
+      try {
+        await FileSystem.deleteAsync(uri);
+        deletedCount += 1;
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
   }
+  return { deletedCount };
 }
 
 export async function getCookLogById(

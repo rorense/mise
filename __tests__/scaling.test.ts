@@ -1,8 +1,10 @@
 import {
+  buildChatIngredientLines,
   formatQuantity,
   renderStepInstruction,
   scaleForIngredient,
   scaleQuantity,
+  splitIngredientSections,
 } from '@/domain/scaling';
 import type { Ingredient } from '@/types/recipe';
 
@@ -57,6 +59,7 @@ describe('formatQuantity', () => {
   it('formats kitchen spoon and cup units as fractions', () => {
     expect(formatQuantity(0.8, 'tsp')).toBe('3/4 tsp');
     expect(formatQuantity(1.25, 'tbsp')).toBe('1 1/4 tbsp');
+    expect(formatQuantity(0.5, 'cup')).toBe('1/2 cup');
     expect(formatQuantity(2, 'cup')).toBe('2 cup');
   });
 
@@ -98,5 +101,80 @@ describe('renderStepInstruction', () => {
         4
       )
     ).toBe('Whisk in.');
+  });
+});
+
+describe('splitIngredientSections', () => {
+  it('treats zero-quantity heading rows as section titles', () => {
+    const ingredients: Ingredient[] = [
+      {
+        id: 'h1',
+        quantity: 0,
+        unit: null,
+        name: 'Sponge Cake',
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: 0,
+      },
+      {
+        id: 'i1',
+        quantity: 40,
+        unit: 'g',
+        name: 'flour',
+        scalable: true,
+        amountMode: 'exact',
+        sortOrder: 1,
+      },
+      {
+        id: 'h2',
+        quantity: 0,
+        unit: null,
+        name: 'Simple Syrup:',
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: 2,
+      },
+      {
+        id: 'i2',
+        quantity: 100,
+        unit: 'g',
+        name: 'sugar',
+        scalable: true,
+        amountMode: 'exact',
+        sortOrder: 3,
+      },
+    ];
+
+    expect(splitIngredientSections(ingredients)).toEqual([
+      { title: 'Sponge Cake', ingredients: [ingredients[1]] },
+      { title: 'Simple Syrup', ingredients: [ingredients[3]] },
+    ]);
+  });
+});
+
+describe('buildChatIngredientLines', () => {
+  it('preserves section headings in chat ingredient output', () => {
+    const ingredients: Ingredient[] = [
+      {
+        id: 'h1',
+        quantity: 0,
+        unit: null,
+        name: 'Sponge Cake',
+        scalable: false,
+        amountMode: 'exact',
+        sortOrder: 0,
+      },
+      {
+        id: 'i1',
+        quantity: 40,
+        unit: 'g',
+        name: 'flour',
+        scalable: true,
+        amountMode: 'exact',
+        sortOrder: 1,
+      },
+    ];
+
+    expect(buildChatIngredientLines(ingredients, 4, 4)).toBe('Sponge Cake:\n- 40 g flour');
   });
 });

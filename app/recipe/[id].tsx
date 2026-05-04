@@ -5,20 +5,25 @@ import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
 import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeChatSheet';
 import {
   addCookLog,
+  cleanupUnusedMediaFiles,
   createRecipeAdjustment,
+  enqueueCookLogAdjustmentTask,
   getRecipeById,
   ignoreRecipeAdjustment,
   listPendingRecipeAdjustments,
   getRecipeServingsOverride,
   setRecipeArchived,
   setRecipeFlags,
+  setRecipeMainImageFromCookLog,
   setRecipeMainImage,
+  setRecipeTags,
   setRecipeServingsOverride,
 } from '@/data/recipes';
 import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import {
   formatIngredientAmount,
   renderStepInstruction,
+  splitIngredientSections,
 } from '@/domain/scaling';
 import { resolveRecipeHeroImage } from '@/domain/recipeImages';
 import {
@@ -37,13 +42,21 @@ import {
 import { getBundledAiKey } from '@/lib/aiConfig';
 import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
 import { newId } from '@/lib/id';
+import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers';
+import {
+  KEYBOARD_AVOIDING_BEHAVIOR,
+  KEYBOARD_VERTICAL_OFFSET,
+  useKeyboardSafeScroll,
+} from '@/lib/ui/keyboardSafe';
 import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Linking,
   Pressable,
   ScrollView,
@@ -62,6 +75,7 @@ export default function RecipeDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<RecipeChatSheetRef>(null);
+  const { scrollRef, scrollFocusedInputIntoView } = useKeyboardSafeScroll<ScrollView>();
   const lastSliderCommitAtRef = useRef(0);
   const isSlidingRef = useRef(false);
   const loadSeqRef = useRef(0);
@@ -71,6 +85,7 @@ export default function RecipeDetailScreen() {
   const [isMissing, setIsMissing] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
+  const [tagDraft, setTagDraft] = useState('');
   const [showArchiveRecipeConfirm, setShowArchiveRecipeConfirm] = useState(false);
   const [readMode, setReadMode] = useState(false);
   const [checklistMode, setChecklistMode] = useState(false);
@@ -85,6 +100,13 @@ export default function RecipeDetailScreen() {
     actions: AppDialogAction[];
   } | null>(null);
   const [pendingAdjustments, setPendingAdjustments] = useState<RecipeAdjustment[]>([]);
+  const [isLoggingCook, setIsLoggingCook] = useState(false);
+  const [isUpdatingTags, setIsUpdatingTags] = useState(false);
+  const [activeTimer, setActiveTimer] = useState<{
+    stepId: string;
+    label: string;
+    remainingSeconds: number;
+  } | null>(null);
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
@@ -125,6 +147,28 @@ export default function RecipeDetailScreen() {
     }, [reload])
   );
 
+  useEffect(() => {
+    if (!activeTimer) return;
+    const handle = setInterval(() => {
+      setActiveTimer((current) => {
+        if (!current) return null;
+        if (current.remainingSeconds <= 1) {
+          setDialog({
+            title: 'Timer done',
+            message: `${current.label} finished.`,
+            actions: [{ label: 'OK', variant: 'primary' }],
+          });
+          return null;
+        }
+        return {
+          ...current,
+          remainingSeconds: current.remainingSeconds - 1,
+        };
+      });
+    }, 1000);
+    return () => clearInterval(handle);
+  }, [activeTimer]);
+
   if (isLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
@@ -162,14 +206,28 @@ export default function RecipeDetailScreen() {
     recipe.cookLogs.find((l) => l.photoUri)?.photoUri
   );
   const sliderMax = Math.max(12, Math.round(recipe.baseServings));
+  const ingredientSections = splitIngredientSections(recipe.ingredients);
 
   const shareRecipe = async () => {
+    const ingredientLines = ingredientSections.flatMap((section, sectionIdx) => {
+      const sectionLines: string[] = [];
+      if (sectionIdx > 0) {
+        sectionLines.push('');
+      }
+      if (section.title) {
+        sectionLines.push(section.title);
+      }
+      section.ingredients.forEach((ingredient) => {
+        sectionLines.push(
+          `- ${formatIngredientAmount(ingredient, recipe.baseServings, servings)} ${ingredient.name}`
+        );
+      });
+      return sectionLines;
+    });
     const lines = [
       recipe.title,
       '',
-      ...recipe.ingredients.map((i) => {
-        return `- ${formatIngredientAmount(i, recipe.baseServings, servings)} ${i.name}`;
-      }),
+      ...ingredientLines,
       '',
       ...recipe.steps
         .sort((a, b) => a.order - b.order)
@@ -186,63 +244,86 @@ export default function RecipeDetailScreen() {
   };
 
   const persistCookLog = async (photoUri?: string) => {
-    const cookLogId = newId();
-    const noteText = noteDraft.trim();
-    await addCookLog({
-      id: cookLogId,
-      recipeId: recipe.id,
-      cookedAt: new Date().toISOString(),
-      photoUri,
-      notes: noteText || undefined,
-      rating: ratingDraft ?? undefined,
-      createdAt: new Date().toISOString(),
-    });
-    let adjustmentId: string | undefined;
-    if (noteText) {
-      const net = await NetInfo.fetch();
-      if (net.isConnected) {
-        const provider = await getAiProvider();
-        const key = getBundledAiKey(provider);
-        if (key) {
-          try {
-            const suggestions = await suggestRecipeAdjustmentsFromCookNote({
-              recipe,
-              note: noteText,
-              provider,
-              apiKey: key,
-            });
-            const adjustment = await createRecipeAdjustment({
+    setIsLoggingCook(true);
+    try {
+      const cookLogId = newId();
+      const noteText = noteDraft.trim();
+      await addCookLog({
+        id: cookLogId,
+        recipeId: recipe.id,
+        cookedAt: new Date().toISOString(),
+        photoUri,
+        notes: noteText || undefined,
+        rating: ratingDraft ?? undefined,
+        createdAt: new Date().toISOString(),
+      });
+      let adjustmentId: string | undefined;
+      if (noteText) {
+        const net = await NetInfo.fetch();
+        if (net.isConnected) {
+          const provider = await getAiProvider();
+          const key = getBundledAiKey(provider);
+          if (key) {
+            try {
+              const suggestions = await suggestRecipeAdjustmentsFromCookNote({
+                recipe,
+                note: noteText,
+                provider,
+                apiKey: key,
+              });
+              const adjustment = await createRecipeAdjustment({
+                recipeId: recipe.id,
+                cookLogId,
+                suggestions,
+              });
+              adjustmentId = adjustment?.id;
+            } catch {
+              // Cook logs still save even if AI extraction fails.
+            }
+          } else {
+            await enqueueCookLogAdjustmentTask({
               recipeId: recipe.id,
               cookLogId,
-              suggestions,
+              note: noteText,
             });
-            adjustmentId = adjustment?.id;
-          } catch {
-            // Cook logs still save even if AI extraction fails.
           }
+        } else {
+          await enqueueCookLogAdjustmentTask({
+            recipeId: recipe.id,
+            cookLogId,
+            note: noteText,
+          });
         }
       }
-    }
-    setNoteDraft('');
-    setRatingDraft(null);
-    await reload();
-    if (adjustmentId) {
+      setNoteDraft('');
+      setRatingDraft(null);
+      await reload();
+      if (adjustmentId) {
+        setDialog({
+          title: 'Suggested recipe updates',
+          message: 'We found note-based updates. Review and choose what to apply.',
+          actions: [
+            { label: 'Later' },
+            {
+              label: 'Ignore',
+              onPress: () => ignoreRecipeAdjustment(adjustmentId!),
+            },
+            {
+              label: 'Review',
+              variant: 'primary',
+              onPress: () => router.push(`/recipe/adjustments/${adjustmentId}`),
+            },
+          ],
+        });
+      }
+    } catch {
       setDialog({
-        title: 'Suggested recipe updates',
-        message: 'We found note-based updates. Review and choose what to apply.',
-        actions: [
-          { label: 'Later' },
-          {
-            label: 'Ignore',
-            onPress: () => ignoreRecipeAdjustment(adjustmentId!),
-          },
-          {
-            label: 'Review',
-            variant: 'primary',
-            onPress: () => router.push(`/recipe/adjustments/${adjustmentId}`),
-          },
-        ],
+        title: 'Could not log cook',
+        message: 'Please try again.',
+        actions: [{ label: 'OK', variant: 'primary' }],
       });
+    } finally {
+      setIsLoggingCook(false);
     }
   };
 
@@ -362,6 +443,42 @@ export default function RecipeDetailScreen() {
         },
         { label: 'Share', onPress: shareRecipe },
         {
+          label: 'Version history',
+          onPress: () => router.push(`/recipe/versions/${recipe.id}`),
+        },
+        {
+          label: 'Use latest cook photo as hero',
+          onPress: async () => {
+            const latestWithPhoto = recipe.cookLogs.find((log) => !!log.photoUri);
+            if (!latestWithPhoto) {
+              setDialog({
+                title: 'No cook photo',
+                message: 'Log a cook with a photo first.',
+                actions: [{ label: 'OK', variant: 'primary' }],
+              });
+              return;
+            }
+            const ok = await setRecipeMainImageFromCookLog(recipe.id, latestWithPhoto.id);
+            if (ok) {
+              await reload();
+            }
+          },
+        },
+        {
+          label: 'Clean unused photos',
+          onPress: async () => {
+            const result = await cleanupUnusedMediaFiles();
+            setDialog({
+              title: 'Cleanup complete',
+              message:
+                result.deletedCount === 0
+                  ? 'No unused photos found.'
+                  : `Removed ${result.deletedCount} unused photo${result.deletedCount === 1 ? '' : 's'}.`,
+              actions: [{ label: 'OK', variant: 'primary' }],
+            });
+          },
+        },
+        {
           label: recipe.isArchived ? 'Unarchive' : 'Archive',
           variant: recipe.isArchived ? 'default' : 'destructive',
           onPress: () => setShowArchiveRecipeConfirm(true),
@@ -400,10 +517,62 @@ export default function RecipeDetailScreen() {
     }
   };
 
+  const persistTags = async (nextTags: string[]) => {
+    const previousTags = recipe.tags;
+    setRecipe({ ...recipe, tags: nextTags });
+    setIsUpdatingTags(true);
+    try {
+      await setRecipeTags(recipe.id, nextTags);
+    } catch {
+      setRecipe((current) => (current ? { ...current, tags: previousTags } : current));
+      setDialog({
+        title: 'Could not update tags',
+        message: 'Please try again.',
+        actions: [{ label: 'OK', variant: 'primary' }],
+      });
+    } finally {
+      setIsUpdatingTags(false);
+    }
+  };
+
+  const addTagsFromDraft = async () => {
+    if (isUpdatingTags) return;
+    const candidates = tagDraft
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    if (candidates.length === 0) return;
+    const existing = new Set(recipe.tags.map((tag) => tag.toLowerCase()));
+    const nextTags = [...recipe.tags];
+    for (const candidate of candidates) {
+      const key = candidate.toLowerCase();
+      if (existing.has(key)) continue;
+      existing.add(key);
+      nextTags.push(candidate);
+    }
+    setTagDraft('');
+    await persistTags(nextTags);
+  };
+
+  const removeTag = async (tagToRemove: string) => {
+    if (isUpdatingTags) return;
+    const nextTags = recipe.tags.filter((tag) => tag.toLowerCase() !== tagToRemove.toLowerCase());
+    await persistTags(nextTags);
+  };
+
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      behavior={KEYBOARD_AVOIDING_BEHAVIOR}
+      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+    >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView
+        ref={scrollRef}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
         <View style={{ height: 260, backgroundColor: colors.border }}>
           {hero ? (
             <Pressable onPress={() => setFullscreenImageUri(hero)} style={{ width: '100%', height: '100%' }}>
@@ -506,8 +675,84 @@ export default function RecipeDetailScreen() {
           {!readMode ? (
             <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
             {recipe.cuisine ? `${recipe.cuisine} · ` : ''}
-            {recipe.tags.join(' · ')}
+            {recipe.tags.length > 0 ? recipe.tags.join(' · ') : 'No tags yet'}
           </Text>
+          ) : null}
+          {!readMode ? (
+            <>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {recipe.tags.map((tag) => (
+                  <Pressable
+                    key={tag}
+                    disabled={isUpdatingTags}
+                    onPress={() => removeTag(tag)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.surface,
+                      opacity: isUpdatingTags ? 0.7 : 1,
+                    }}
+                  >
+                    <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
+                      {tag}
+                    </Text>
+                    <Ionicons name="close" size={14} color={colors.textSecondary} />
+                  </Pressable>
+                ))}
+              </View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <TextInput
+                  value={tagDraft}
+                  onChangeText={setTagDraft}
+                  onSubmitEditing={() => {
+                    void addTagsFromDraft();
+                  }}
+                  editable={!isUpdatingTags}
+                  placeholder="Add tags (comma separated)"
+                  placeholderTextColor={colors.textSecondary}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    borderRadius: 10,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    color: colors.textPrimary,
+                    backgroundColor: colors.surface,
+                    opacity: isUpdatingTags ? 0.7 : 1,
+                  }}
+                />
+                <Pressable
+                  onPress={() => {
+                    void addTagsFromDraft();
+                  }}
+                  disabled={isUpdatingTags}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.primary,
+                    backgroundColor: colors.primary + '1A',
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 9,
+                    opacity: isUpdatingTags ? 0.7 : 1,
+                  }}
+                >
+                  <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.primary }}>Add</Text>
+                </Pressable>
+              </View>
+            </>
           ) : null}
           {!readMode ? (
             <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -678,42 +923,61 @@ export default function RecipeDetailScreen() {
             </Text>
           </Pressable>
           {(readMode || showIngredients)
-            ? recipe.ingredients.map((ing) => {
-            const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
-            const checked = checkedIngredientIds.includes(ing.id);
-            return (
-              <Pressable
-                key={ing.id}
-                onPress={() => {
-                  if (checklistMode) {
-                    toggleIngredientChecked(ing.id);
-                  }
-                }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 }}
-              >
-                {checklistMode ? (
-                  <Ionicons
-                    name={checked ? 'checkbox' : 'square-outline'}
-                    size={18}
-                    color={checked ? colors.primary : colors.textSecondary}
-                  />
-                ) : null}
-                <Text
-                  style={{
-                    fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
-                    color: checked ? colors.textSecondary : colors.textPrimary,
-                    textDecorationLine: checked ? 'line-through' : 'none',
-                    fontSize: readMode ? 17 : 15,
-                    lineHeight: readMode ? 26 : 21,
-                  }}
+            ? ingredientSections.map((section, sectionIdx) => (
+                <View
+                  key={`section-${section.title ?? 'default'}-${sectionIdx}`}
+                  style={{ marginTop: sectionIdx === 0 ? 0 : 6 }}
                 >
-                  {!checklistMode ? '· ' : ''}
-                  {amount} {ing.name}
-                  {!ing.scalable && ing.amountMode !== 'to_taste' ? '  ⚠ adjust to taste' : ''}
-                </Text>
-              </Pressable>
-            );
-          })
+                  {section.title ? (
+                    <Text
+                      style={{
+                        color: colors.textPrimary,
+                        fontFamily: 'DMSans_700Bold',
+                        marginTop: sectionIdx === 0 ? 0 : 4,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {section.title}
+                    </Text>
+                  ) : null}
+                  {section.ingredients.map((ing) => {
+                    const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
+                    const checked = checkedIngredientIds.includes(ing.id);
+                    return (
+                      <Pressable
+                        key={ing.id}
+                        onPress={() => {
+                          if (checklistMode) {
+                            toggleIngredientChecked(ing.id);
+                          }
+                        }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 }}
+                      >
+                        {checklistMode ? (
+                          <Ionicons
+                            name={checked ? 'checkbox' : 'square-outline'}
+                            size={18}
+                            color={checked ? colors.primary : colors.textSecondary}
+                          />
+                        ) : null}
+                        <Text
+                          style={{
+                            fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
+                            color: checked ? colors.textSecondary : colors.textPrimary,
+                            textDecorationLine: checked ? 'line-through' : 'none',
+                            fontSize: readMode ? 17 : 15,
+                            lineHeight: readMode ? 26 : 21,
+                          }}
+                        >
+                          {!checklistMode ? '· ' : ''}
+                          {amount} {ing.name}
+                          {!ing.scalable && ing.amountMode !== 'to_taste' ? '  ⚠ adjust to taste' : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))
             : null}
           <Pressable
             onPress={() => setShowMethod((v) => !v)}
@@ -732,30 +996,58 @@ export default function RecipeDetailScreen() {
             ? recipe.steps
             .sort((a, b) => a.order - b.order)
             .map((s, idx) => (
-              <View key={s.id} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                <View
-                  style={{
-                    minWidth: 28,
-                    height: 28,
-                    borderRadius: 14,
-                    backgroundColor: colors.primary,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>{idx + 1}</Text>
+              <View key={s.id} style={{ marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View
+                    style={{
+                      minWidth: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: colors.primary,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>{idx + 1}</Text>
+                  </View>
+                  <Text
+                    style={{
+                      flex: 1,
+                      fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
+                      color: colors.textPrimary,
+                      fontSize: readMode ? 17 : 15,
+                      lineHeight: readMode ? 28 : 22,
+                    }}
+                  >
+                    {renderStepInstruction(s, recipe.baseServings, servings)}
+                  </Text>
                 </View>
-                <Text
-                  style={{
-                    flex: 1,
-                    fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
-                    color: colors.textPrimary,
-                    fontSize: readMode ? 17 : 15,
-                    lineHeight: readMode ? 28 : 22,
-                  }}
-                >
-                  {renderStepInstruction(s, recipe.baseServings, servings)}
-                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6, marginLeft: 38 }}>
+                  {extractStepTimerPresets(s.instruction).map((preset) => (
+                    <Pressable
+                      key={preset.key}
+                      onPress={() =>
+                        setActiveTimer({
+                          stepId: s.id,
+                          label: `Step ${idx + 1} · ${preset.label}`,
+                          remainingSeconds: preset.seconds,
+                        })
+                      }
+                      style={{
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        backgroundColor: colors.surface,
+                        borderRadius: 999,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                      }}
+                    >
+                      <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium', fontSize: 12 }}>
+                        Start {preset.label} timer
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             ))
             : null}
@@ -812,6 +1104,25 @@ export default function RecipeDetailScreen() {
                           </Text>
                         ) : null}
                       </Pressable>
+                      {log.photoUri ? (
+                        <Pressable
+                          onPress={async () => {
+                            await setRecipeMainImageFromCookLog(recipe.id, log.id);
+                            await reload();
+                          }}
+                        >
+                          <Text
+                            style={{
+                              marginTop: 4,
+                              color: colors.primary,
+                              fontFamily: 'DMSans_500Medium',
+                              fontSize: 12,
+                            }}
+                          >
+                            Set as hero
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   ))}
                 </ScrollView>
@@ -854,6 +1165,9 @@ export default function RecipeDetailScreen() {
                 placeholderTextColor={colors.textSecondary}
                 value={noteDraft}
                 onChangeText={setNoteDraft}
+                onFocus={() => {
+                  scrollFocusedInputIntoView();
+                }}
                 style={{
                   borderWidth: 1,
                   borderColor: colors.border,
@@ -865,15 +1179,21 @@ export default function RecipeDetailScreen() {
                 }}
               />
               <Pressable
+                disabled={isLoggingCook}
                 onPress={logCook}
                 style={{
                   backgroundColor: colors.primary,
                   padding: 14,
                   borderRadius: 14,
                   alignItems: 'center',
+                  opacity: isLoggingCook ? 0.7 : 1,
                 }}
               >
-                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
+                {isLoggingCook ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
+                )}
               </Pressable>
             </>
           ) : null}
@@ -923,6 +1243,38 @@ export default function RecipeDetailScreen() {
           <RecipeChatSheet ref={sheetRef} />
         </>
       ) : null}
+      {activeTimer ? (
+        <View
+          style={{
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            bottom: insets.bottom + 14,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular', fontSize: 12 }}>
+              Active timer
+            </Text>
+            <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
+              {activeTimer.label} · {formatTimerRemaining(activeTimer.remainingSeconds)}
+            </Text>
+          </View>
+          <Pressable onPress={() => setActiveTimer(null)}>
+            <Text style={{ color: colors.destructive, fontFamily: 'DMSans_700Bold' }}>Stop</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <ConfirmDialog
         visible={showArchiveRecipeConfirm}
         title={recipe.isArchived ? 'Unarchive recipe?' : 'Archive recipe?'}
@@ -936,8 +1288,28 @@ export default function RecipeDetailScreen() {
         onCancel={() => setShowArchiveRecipeConfirm(false)}
         onConfirm={async () => {
           setShowArchiveRecipeConfirm(false);
-          await setRecipeArchived(recipe.id, !recipe.isArchived);
-          router.replace('/');
+          const previousArchived = recipe.isArchived;
+          const nextArchived = !previousArchived;
+          await setRecipeArchived(recipe.id, nextArchived);
+          setRecipe({ ...recipe, isArchived: nextArchived });
+          setDialog({
+            title: nextArchived ? 'Recipe archived' : 'Recipe unarchived',
+            message: nextArchived
+              ? 'This recipe is hidden from your active library.'
+              : 'This recipe is back in your active library.',
+            actions: [
+              {
+                label: 'Undo',
+                onPress: async () => {
+                  await setRecipeArchived(recipe.id, previousArchived);
+                  setRecipe((current) =>
+                    current ? { ...current, isArchived: previousArchived } : current
+                  );
+                },
+              },
+              { label: 'OK', variant: 'primary' },
+            ],
+          });
         }}
       />
       <AppDialog
@@ -951,6 +1323,41 @@ export default function RecipeDetailScreen() {
         imageUri={fullscreenImageUri}
         onClose={() => setFullscreenImageUri(null)}
       />
+      {isLoggingCook ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: '#0000001A',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <ActivityIndicator color={colors.primary} />
+            <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
+              Logging cook...
+            </Text>
+          </View>
+        </View>
+      ) : null}
     </View>
+    </KeyboardAvoidingView>
   );
 }

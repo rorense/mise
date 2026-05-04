@@ -41,7 +41,11 @@ function ThemedStack() {
 
   return (
     <>
-      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
+      <StatusBar
+        style={resolved === 'dark' ? 'light' : 'dark'}
+        translucent={false}
+        backgroundColor={colors.background}
+      />
       <NavigationThemeProvider value={navigationTheme}>
         <Stack
           screenOptions={{

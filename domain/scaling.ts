@@ -182,6 +182,49 @@ export function formatIngredientAmount(
   return formatQuantity(quantity, ingredient.unit);
 }
 
+export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
+  const name = ingredient.name.trim();
+  if (!name) return false;
+  if (ingredient.amountMode !== 'exact') return false;
+  if (ingredient.quantity > 0) return false;
+  if (ingredient.unit) return false;
+  if (/\d/.test(name)) return false;
+  if (/to taste/i.test(name)) return false;
+  return true;
+}
+
+function normalizeSectionTitle(raw: string): string {
+  return raw.replace(/[:\-–—]\s*$/, '').trim();
+}
+
+export function splitIngredientSections(ingredients: Ingredient[]): {
+  title: string | null;
+  ingredients: Ingredient[];
+}[] {
+  const sorted = [...ingredients].sort((a, b) => a.sortOrder - b.sortOrder);
+  const sections: { title: string | null; ingredients: Ingredient[] }[] = [];
+  let pendingTitle: string | null = null;
+  let currentIngredients: Ingredient[] = [];
+
+  for (const ingredient of sorted) {
+    if (isIngredientSectionHeading(ingredient)) {
+      if (currentIngredients.length > 0) {
+        sections.push({ title: pendingTitle, ingredients: currentIngredients });
+        currentIngredients = [];
+      }
+      pendingTitle = normalizeSectionTitle(ingredient.name);
+      continue;
+    }
+    currentIngredients.push(ingredient);
+  }
+
+  if (currentIngredients.length > 0 || sections.length === 0) {
+    sections.push({ title: pendingTitle, ingredients: currentIngredients });
+  }
+
+  return sections;
+}
+
 export function renderStepInstruction(
   step: Step,
   _baseServings: number,
@@ -202,14 +245,26 @@ export function buildChatIngredientLines(
   baseServings: number,
   currentServings: number
 ): string {
-  return ingredients
-    .map((i) => {
-      const qty = formatIngredientAmount(i, baseServings, currentServings);
-      const notes = i.notes ? ` (${i.notes})` : '';
-      const hint = !i.scalable && i.amountMode !== 'to_taste' ? ' [adjust to taste]' : '';
-      return `- ${qty} ${i.name}${notes}${hint}`;
-    })
-    .join('\n');
+  const lines: string[] = [];
+  const sections = splitIngredientSections(ingredients);
+  sections.forEach((section, sectionIdx) => {
+    if (sectionIdx > 0 && lines.length > 0) {
+      lines.push('');
+    }
+    if (section.title) {
+      lines.push(`${section.title}:`);
+    }
+    section.ingredients.forEach((ingredient) => {
+      const qty = formatIngredientAmount(ingredient, baseServings, currentServings);
+      const notes = ingredient.notes ? ` (${ingredient.notes})` : '';
+      const hint =
+        !ingredient.scalable && ingredient.amountMode !== 'to_taste'
+          ? ' [adjust to taste]'
+          : '';
+      lines.push(`- ${qty} ${ingredient.name}${notes}${hint}`);
+    });
+  });
+  return lines.join('\n');
 }
 
 export function buildSystemPrompt(

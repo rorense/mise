@@ -18,23 +18,36 @@ type BackupPayload = {
     tags: BackupRow[];
     recipe_tags: BackupRow[];
     cook_logs: BackupRow[];
+    recipe_versions: BackupRow[];
+    queued_ai_actions: BackupRow[];
   };
 };
 
 type BackupRow = Record<string, string | number | null>;
 
-const TABLES = ['recipes', 'ingredients', 'steps', 'tags', 'recipe_tags', 'cook_logs'] as const;
+const TABLES = [
+  'recipes',
+  'ingredients',
+  'steps',
+  'tags',
+  'recipe_tags',
+  'cook_logs',
+  'recipe_versions',
+  'queued_ai_actions',
+] as const;
 
 export async function exportBackupPayload(): Promise<BackupPayload> {
   const db = await getDatabase();
   const appearance = await getAppearance();
-  const [recipes, ingredients, steps, tags, recipeTags, cookLogs] = await Promise.all([
+  const [recipes, ingredients, steps, tags, recipeTags, cookLogs, recipeVersions, queuedAiActions] = await Promise.all([
     db.getAllAsync<BackupRow>('SELECT * FROM recipes'),
     db.getAllAsync<BackupRow>('SELECT * FROM ingredients'),
     db.getAllAsync<BackupRow>('SELECT * FROM steps'),
     db.getAllAsync<BackupRow>('SELECT * FROM tags'),
     db.getAllAsync<BackupRow>('SELECT * FROM recipe_tags'),
     db.getAllAsync<BackupRow>('SELECT * FROM cook_logs'),
+    db.getAllAsync<BackupRow>('SELECT * FROM recipe_versions'),
+    db.getAllAsync<BackupRow>('SELECT * FROM queued_ai_actions'),
   ]);
 
   return {
@@ -51,6 +64,8 @@ export async function exportBackupPayload(): Promise<BackupPayload> {
       tags,
       recipe_tags: recipeTags,
       cook_logs: cookLogs,
+      recipe_versions: recipeVersions,
+      queued_ai_actions: queuedAiActions,
     },
   };
 }
@@ -78,6 +93,10 @@ function validatePayload(value: unknown): BackupPayload {
     throw new Error('Invalid backup file');
   }
   const tables = value.tables;
+  const recipeVersions = isBackupRows(tables.recipe_versions) ? tables.recipe_versions : [];
+  const queuedAiActions = isBackupRows(tables.queued_ai_actions)
+    ? tables.queued_ai_actions
+    : [];
   if (
     !isBackupRows(tables.recipes) ||
     !isBackupRows(tables.ingredients) ||
@@ -88,7 +107,19 @@ function validatePayload(value: unknown): BackupPayload {
   ) {
     throw new Error('Invalid backup table format');
   }
-  return value as BackupPayload;
+  return {
+    ...(value as BackupPayload),
+    tables: {
+      recipes: tables.recipes as BackupRow[],
+      ingredients: tables.ingredients as BackupRow[],
+      steps: tables.steps as BackupRow[],
+      tags: tables.tags as BackupRow[],
+      recipe_tags: tables.recipe_tags as BackupRow[],
+      cook_logs: tables.cook_logs as BackupRow[],
+      recipe_versions: recipeVersions,
+      queued_ai_actions: queuedAiActions,
+    },
+  };
 }
 
 export async function restoreBackupJson(rawJson: string): Promise<void> {
@@ -174,6 +205,27 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
           row.notes ?? null,
           row.rating ?? null,
           row.created_at,
+        ]
+      );
+    }
+    for (const row of parsed.tables.recipe_versions) {
+      await db.runAsync(
+        `INSERT INTO recipe_versions (id, recipe_id, label, snapshot_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.id, row.recipe_id, row.label, row.snapshot_json, row.created_at]
+      );
+    }
+    for (const row of parsed.tables.queued_ai_actions) {
+      await db.runAsync(
+        `INSERT INTO queued_ai_actions (id, action_type, payload_json, created_at, attempts, last_error)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.action_type,
+          row.payload_json,
+          row.created_at,
+          row.attempts ?? 0,
+          row.last_error ?? null,
         ]
       );
     }

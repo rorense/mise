@@ -3,11 +3,17 @@ import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import { newId } from '@/lib/id';
 import { takeImportDraft } from '@/lib/importDraftStore';
+import {
+  KEYBOARD_AVOIDING_BEHAVIOR,
+  KEYBOARD_VERTICAL_OFFSET,
+  useKeyboardSafeScroll,
+} from '@/lib/ui/keyboardSafe';
 import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   Text,
@@ -18,6 +24,7 @@ import {
 export default function ImportPreviewScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  const { scrollRef, scrollFocusedInputIntoView } = useKeyboardSafeScroll<ScrollView>();
   const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(() => takeImportDraft());
   const [ingredientText, setIngredientText] = useState(() =>
     (draft?.ingredients ?? [])
@@ -69,6 +76,7 @@ export default function ImportPreviewScreen() {
         (modeRaw ?? 'exact') === 'to_taste' ||
         /to taste/i.test(ingredientNameRaw) ||
         /to taste/i.test(ingredientNotesRaw ?? '');
+      const amountMode: 'to_taste' | 'exact' = toTaste ? 'to_taste' : 'exact';
       return {
         id: existing?.id ?? newId(),
         quantity: toTaste ? 0 : Number.isFinite(quantity) ? quantity : 0,
@@ -76,7 +84,7 @@ export default function ImportPreviewScreen() {
         name: ingredientNameRaw || existing?.name || '',
         notes: ingredientNotesRaw ? ingredientNotesRaw : undefined,
         scalable: toTaste ? false : (ingredientScalableRaw || 'y').toLowerCase() !== 'n',
-        amountMode: toTaste ? 'to_taste' : 'exact',
+        amountMode,
         sortOrder: idx,
       };
     });
@@ -101,9 +109,16 @@ export default function ImportPreviewScreen() {
   };
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      behavior={KEYBOARD_AVOIDING_BEHAVIOR}
+      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+    >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
       <ScrollView
+        ref={scrollRef}
+        keyboardShouldPersistTaps="handled"
         style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 12, paddingBottom: 40 }}
       >
@@ -118,6 +133,7 @@ export default function ImportPreviewScreen() {
         value={draft.title}
         onChange={(t) => setDraft({ ...draft, title: t })}
         colors={colors}
+        onFocus={scrollFocusedInputIntoView}
       />
       <Field
         label="Base servings"
@@ -125,12 +141,14 @@ export default function ImportPreviewScreen() {
         onChange={(t) => setDraft({ ...draft, baseServings: Number(t) || 1 })}
         colors={colors}
         keyboardType="decimal-pad"
+        onFocus={scrollFocusedInputIntoView}
       />
       <Field
         label="Cuisine"
         value={draft.cuisine ?? ''}
         onChange={(t) => setDraft({ ...draft, cuisine: t || undefined })}
         colors={colors}
+        onFocus={scrollFocusedInputIntoView}
       />
       <Field
         label="Tags (comma separated)"
@@ -145,6 +163,7 @@ export default function ImportPreviewScreen() {
           })
         }
         colors={colors}
+        onFocus={scrollFocusedInputIntoView}
       />
       <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
         Ingredients (qty|unit|name|y/n|notes|exact/to_taste)
@@ -154,6 +173,7 @@ export default function ImportPreviewScreen() {
         value={ingredientText}
         onChangeText={setIngredientText}
         onEndEditing={() => setDraft(parseIngredientLines())}
+        onFocus={scrollFocusedInputIntoView}
         style={{
           minHeight: 140,
           borderWidth: 1,
@@ -174,6 +194,7 @@ export default function ImportPreviewScreen() {
         value={stepText}
         onChangeText={setStepText}
         onEndEditing={() => setDraft(parseStepLines())}
+        onFocus={scrollFocusedInputIntoView}
         style={{
           minHeight: 140,
           borderWidth: 1,
@@ -211,6 +232,7 @@ export default function ImportPreviewScreen() {
         </Pressable>
       </ScrollView>
     </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -220,12 +242,14 @@ function Field({
   onChange,
   colors,
   keyboardType = 'default',
+  onFocus,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   colors: ReturnType<typeof useTheme>['colors'];
   keyboardType?: 'default' | 'decimal-pad';
+  onFocus?: () => void;
 }) {
   return (
     <View>
@@ -241,6 +265,7 @@ function Field({
       <TextInput
         value={value}
         onChangeText={onChange}
+        onFocus={onFocus}
         keyboardType={keyboardType}
         style={{
           borderWidth: 1,

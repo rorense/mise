@@ -22,6 +22,10 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAF8F5"
       },
+      "statusBar": {
+        "backgroundColor": "#FAF8F5",
+        "translucent": false
+      },
       "package": "com.mise.app",
       "permissions": [
         "android.permission.RECORD_AUDIO"

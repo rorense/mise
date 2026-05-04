@@ -7,12 +7,18 @@ import {
   importFromUrl,
 } from '@/lib/import/pipeline';
 import { setImportDraft } from '@/lib/importDraftStore';
+import {
+  KEYBOARD_AVOIDING_BEHAVIOR,
+  KEYBOARD_VERTICAL_OFFSET,
+  useKeyboardSafeScroll,
+} from '@/lib/ui/keyboardSafe';
 import { useTheme } from '@/theme/ThemeContext';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   Text,
@@ -24,6 +30,7 @@ import NetInfo from '@react-native-community/netinfo';
 export default function ImportScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  const { scrollRef, scrollFocusedInputIntoView } = useKeyboardSafeScroll<ScrollView>();
   const [url, setUrl] = useState('');
   const [batchText, setBatchText] = useState('');
   const [tab, setTab] = useState<'url' | 'paste'>('url');
@@ -95,7 +102,7 @@ export default function ImportScreen() {
     try {
       const draft = await importFromUrl(trimmedUrl, ai.provider, ai.key, yt);
       setImportDraft(draft);
-      router.push('/import/preview');
+      router.push('/recipe/form');
     } catch (e) {
       setDialog({
         title: 'Import failed',
@@ -137,7 +144,7 @@ export default function ImportScreen() {
         'manual'
       );
       setImportDraft(draft);
-      router.push('/import/preview');
+      router.push('/recipe/form');
     } catch (e) {
       setDialog({
         title: 'Import failed',
@@ -157,9 +164,19 @@ export default function ImportScreen() {
   };
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      behavior={KEYBOARD_AVOIDING_BEHAVIOR}
+      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+    >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BackButton />
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 16 }}>
+      <ScrollView
+        ref={scrollRef}
+        keyboardShouldPersistTaps="handled"
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 16 }}
+      >
         <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
           Import
         </Text>
@@ -201,6 +218,7 @@ export default function ImportScreen() {
             multiline
             value={batchText}
             onChangeText={setBatchText}
+            onFocus={scrollFocusedInputIntoView}
             placeholder="Paste recipe text..."
             placeholderTextColor={colors.textSecondary}
             style={{
@@ -238,6 +256,7 @@ export default function ImportScreen() {
           <TextInput
             value={url}
             onChangeText={setUrl}
+            onFocus={scrollFocusedInputIntoView}
             placeholder="https://…"
             placeholderTextColor={colors.textSecondary}
             autoCapitalize="none"
@@ -283,5 +302,6 @@ export default function ImportScreen() {
         onClose={() => setDialog(null)}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 }
