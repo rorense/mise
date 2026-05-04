@@ -44,6 +44,12 @@ import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustment
 import { newId } from '@/lib/id';
 import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers';
 import {
+  ensureTimerNotificationPermission,
+  presentTimerDoneNotification,
+  registerTimerNotificationActionListener,
+  syncActiveTimerNotification,
+} from '@/lib/timerNotifications';
+import {
   KEYBOARD_AVOIDING_BEHAVIOR,
   KEYBOARD_VERTICAL_OFFSET,
   useKeyboardSafeScroll,
@@ -106,7 +112,9 @@ export default function RecipeDetailScreen() {
     stepId: string;
     label: string;
     remainingSeconds: number;
+    isPaused: boolean;
   } | null>(null);
+  const hasRequestedNotificationPermissionRef = useRef(false);
   const AI_ENABLED = false;
 
   const reload = useCallback(async () => {
@@ -148,11 +156,24 @@ export default function RecipeDetailScreen() {
   );
 
   useEffect(() => {
-    if (!activeTimer) return;
+    return registerTimerNotificationActionListener((action) => {
+      setActiveTimer((current) => {
+        if (!current) return current;
+        if (action === 'stop') return null;
+        if (action === 'pause') return { ...current, isPaused: true };
+        if (action === 'resume') return { ...current, isPaused: false };
+        return current;
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!activeTimer || activeTimer.isPaused) return;
     const handle = setInterval(() => {
       setActiveTimer((current) => {
         if (!current) return null;
         if (current.remainingSeconds <= 1) {
+          void presentTimerDoneNotification(current.label);
           setDialog({
             title: 'Timer done',
             message: `${current.label} finished.`,
@@ -167,7 +188,40 @@ export default function RecipeDetailScreen() {
       });
     }, 1000);
     return () => clearInterval(handle);
+  }, [activeTimer, setDialog]);
+
+  useEffect(() => {
+    if (!activeTimer) {
+      void syncActiveTimerNotification(null);
+      return;
+    }
+    const shouldRefreshNotification =
+      activeTimer.isPaused ||
+      activeTimer.remainingSeconds <= 10 ||
+      activeTimer.remainingSeconds % 15 === 0;
+    if (shouldRefreshNotification) {
+      void syncActiveTimerNotification(activeTimer);
+    }
   }, [activeTimer]);
+
+  useEffect(() => {
+    return () => {
+      void syncActiveTimerNotification(null);
+    };
+  }, []);
+
+  const startStepTimer = useCallback(async (stepId: string, label: string, seconds: number) => {
+    if (!hasRequestedNotificationPermissionRef.current) {
+      hasRequestedNotificationPermissionRef.current = true;
+      void ensureTimerNotificationPermission();
+    }
+    setActiveTimer({
+      stepId,
+      label,
+      remainingSeconds: seconds,
+      isPaused: false,
+    });
+  }, []);
 
   if (isLoading) {
     return (
@@ -1026,13 +1080,7 @@ export default function RecipeDetailScreen() {
                   {extractStepTimerPresets(s.instruction).map((preset) => (
                     <Pressable
                       key={preset.key}
-                      onPress={() =>
-                        setActiveTimer({
-                          stepId: s.id,
-                          label: `Step ${idx + 1} · ${preset.label}`,
-                          remainingSeconds: preset.seconds,
-                        })
-                      }
+                      onPress={() => void startStepTimer(s.id, `Step ${idx + 1} · ${preset.label}`, preset.seconds)}
                       style={{
                         borderWidth: 1,
                         borderColor: colors.border,
@@ -1270,6 +1318,17 @@ export default function RecipeDetailScreen() {
               {activeTimer.label} · {formatTimerRemaining(activeTimer.remainingSeconds)}
             </Text>
           </View>
+          <Pressable
+            onPress={() =>
+              setActiveTimer((current) =>
+                current ? { ...current, isPaused: !current.isPaused } : current
+              )
+            }
+          >
+            <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>
+              {activeTimer.isPaused ? 'Resume' : 'Pause'}
+            </Text>
+          </Pressable>
           <Pressable onPress={() => setActiveTimer(null)}>
             <Text style={{ color: colors.destructive, fontFamily: 'DMSans_700Bold' }}>Stop</Text>
           </Pressable>
