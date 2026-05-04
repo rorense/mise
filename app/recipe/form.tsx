@@ -133,6 +133,7 @@ export default function RecipeFormScreen() {
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
   const [showStepDragHint, setShowStepDragHint] = useState(false);
   const [showPasteAi, setShowPasteAi] = useState(false);
+  const [startedFromImport, setStartedFromImport] = useState(false);
   const [rawPasteText, setRawPasteText] = useState('');
   const [parseBusy, setParseBusy] = useState(false);
   const [ingredientQuantityInputs, setIngredientQuantityInputs] = useState<Record<string, string>>({});
@@ -161,6 +162,7 @@ export default function RecipeFormScreen() {
       } else {
         const importedDraft = takeImportDraft();
         if (importedDraft) {
+          setStartedFromImport(true);
           setRecipe(importedDraft);
         } else {
           setRecipe(await createManualRecipeDraft());
@@ -864,6 +866,13 @@ export default function RecipeFormScreen() {
             }
             try {
               await saveRecipe(recipe);
+              if (!recipeId && startedFromImport) {
+                router.replace({
+                  pathname: '/recipe/[id]',
+                  params: { id: recipe.id, fromImport: '1' },
+                });
+                return;
+              }
               router.replace(`/recipe/${recipe.id}`);
             } catch (e) {
               setDialog({

@@ -24,6 +24,9 @@ Rules:
 - If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
 - Do NOT turn an ingredient into a heading just because quantity is unknown/missing. If unsure, keep it as an ingredient row.
 - Set scalableQuantities to [] for each step unless placeholders are already present in source text.
+- Method quality is critical: keep steps specific and practical. Preserve actionable details from source text including heat level, timing, temperatures, texture/visual cues, mixing order, and doneness checks.
+- Do not collapse multiple distinct actions into vague single lines.
+- Avoid vague instructions like "cook until done" unless the source gives no better detail. Prefer concrete wording.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -227,6 +230,60 @@ function parseSteps(raw: unknown): Step[] | null {
   return out;
 }
 
+function countWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function isVagueMethodStep(step: string): boolean {
+  const text = step.trim();
+  if (!text) return true;
+  if (
+    /\b(cook|bake|fry|simmer|boil|mix|stir)\s+until\s+(done|ready)\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (/\b(as needed|as desired|to preference)\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function stepHasConcreteDetail(step: string): boolean {
+  const text = step.trim();
+  if (!text) return false;
+  if (/\d/.test(text)) return true;
+  if (
+    /\b(minute|minutes|hour|hours|second|seconds|°c|celsius|oven|preheat|low heat|medium heat|high heat|simmer|boil|golden|browned|translucent|thickened|softened|fragrant)\b/i.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function stepsAreDetailedEnough(steps: Step[]): boolean {
+  if (steps.length === 0) return false;
+  const instructions = steps.map((step) => step.instruction.trim()).filter(Boolean);
+  if (instructions.length === 0) return false;
+  const shortCount = instructions.filter((line) => countWords(line) < 4).length;
+  if (shortCount > Math.max(1, Math.floor(instructions.length / 3))) {
+    return false;
+  }
+  const nonVagueCount = instructions.filter((line) => !isVagueMethodStep(line)).length;
+  if (nonVagueCount < Math.max(1, Math.ceil(instructions.length * 0.7))) {
+    return false;
+  }
+  const concreteCount = instructions.filter(stepHasConcreteDetail).length;
+  if (instructions.length === 1) {
+    return concreteCount === 1 && countWords(instructions[0]) >= 10;
+  }
+  return concreteCount >= Math.max(1, Math.ceil(instructions.length * 0.5));
+}
+
 export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
   let data: unknown;
   try {
@@ -277,30 +334,55 @@ export async function extractRecipeFromText(
     content: string;
   }
 ): Promise<Omit<Recipe, 'cookLogs'>> {
-  const user = `Source type: ${payload.sourceType}
+  const baseUser = `Source type: ${payload.sourceType}
 Source URL (may be empty): ${payload.sourceUrl}
 
 Content:
 ${payload.content.slice(0, 24000)}`;
+  let methodFeedback = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const user = methodFeedback
+      ? `${baseUser}
 
-  const raw = await llmCompletion(
-    provider,
-    apiKey,
-    [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: user },
-    ],
-    { temperature: 0.2 }
-  );
+Additional instruction:
+${methodFeedback}`
+      : baseUser;
 
-  const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
-  const parsed = parseRecipeJson(cleaned);
-  if (!parsed) {
-    throw new Error('Could not parse recipe JSON from model output');
+    const raw = await llmCompletion(
+      provider,
+      apiKey,
+      [
+        { role: 'system', content: SYSTEM },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.2 }
+    );
+
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
+    const parsed = parseRecipeJson(cleaned);
+    if (!parsed) {
+      if (attempt === 1) {
+        throw new Error('Could not parse recipe JSON from model output');
+      }
+      methodFeedback =
+        'Return valid JSON only and ensure method steps are fully detailed and specific.';
+      continue;
+    }
+    if (!stepsAreDetailedEnough(parsed.steps)) {
+      if (attempt === 1) {
+        throw new Error(
+          'Imported method is too brief. Please provide more detailed method text and try again.'
+        );
+      }
+      methodFeedback =
+        'The method was too brief. Rewrite steps with concrete detail: include timing, heat/temperature, sequence, and doneness cues for each major action.';
+      continue;
+    }
+    return {
+      ...parsed,
+      sourceUrl: payload.sourceUrl,
+      sourceType: payload.sourceType,
+    };
   }
-  return {
-    ...parsed,
-    sourceUrl: payload.sourceUrl,
-    sourceType: payload.sourceType,
-  };
+  throw new Error('Could not extract recipe method details');
 }

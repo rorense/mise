@@ -74,7 +74,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo from '@react-native-community/netinfo';
 
 export default function RecipeDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, fromImport } = useLocalSearchParams<{ id: string; fromImport?: string }>();
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -115,6 +115,7 @@ export default function RecipeDetailScreen() {
   } | null>(null);
   const hasRequestedNotificationPermissionRef = useRef(false);
   const AI_ENABLED = false;
+  const shouldBackToHome = fromImport === '1' || fromImport === 'true';
 
   const reload = useCallback(async () => {
     setIsLoading(true);
@@ -594,7 +595,7 @@ export default function RecipeDetailScreen() {
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
+      <BackButton onPress={shouldBackToHome ? () => router.replace('/') : undefined} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"

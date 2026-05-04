@@ -4,12 +4,22 @@ import { useRouter } from 'expo-router';
 import { Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-export function BackButton({ topOffset = 0 }: { topOffset?: number }) {
+export function BackButton({
+  topOffset = 0,
+  onPress,
+}: {
+  topOffset?: number;
+  onPress?: () => void;
+}) {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   const handlePress = () => {
+    if (onPress) {
+      onPress();
+      return;
+    }
     const maybeRouter = router as unknown as {
       canGoBack?: () => boolean;
       back: () => void;
