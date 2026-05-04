@@ -862,8 +862,15 @@ export default function RecipeFormScreen() {
               });
               return;
             }
-            await saveRecipe(recipe);
-            router.replace(`/recipe/${recipe.id}`);
+            try {
+              await saveRecipe(recipe);
+              router.replace(`/recipe/${recipe.id}`);
+            } catch (e) {
+              setDialog({
+                title: 'Save failed',
+                message: e instanceof Error ? e.message : 'Unknown error while saving recipe.',
+              });
+            }
           }}
           style={{
             backgroundColor: colors.primary,

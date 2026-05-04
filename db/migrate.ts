@@ -21,7 +21,6 @@ const MIGRATIONS: Record<number, string> = {
       name TEXT NOT NULL,
       notes TEXT,
       scalable INTEGER NOT NULL DEFAULT 1,
-      amount_mode TEXT NOT NULL DEFAULT 'exact' CHECK(amount_mode IN ('exact','to_taste')),
       sort_order INTEGER NOT NULL DEFAULT 0
     );
 
@@ -136,6 +135,17 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
 
   for (const version of versions) {
     if (version > current) {
+      if (version === 6) {
+        const columns = await db.getAllAsync<{ name: string }>(
+          'PRAGMA table_info(ingredients)'
+        );
+        const hasAmountMode = columns.some((column) => column.name === 'amount_mode');
+        if (hasAmountMode) {
+          await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
+          current = version;
+          continue;
+        }
+      }
       await db.execAsync(MIGRATIONS[version]);
       await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
       current = version;

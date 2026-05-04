@@ -215,8 +215,12 @@ export default function ImportPreviewScreen() {
               steps: parseStepLines().steps,
             };
             setDraft(withSteps);
-            await saveRecipe(withSteps);
-            router.replace(`/recipe/${withSteps.id}`);
+            try {
+              await saveRecipe(withSteps);
+              router.replace(`/recipe/${withSteps.id}`);
+            } catch (e) {
+              alert(e instanceof Error ? `Save failed: ${e.message}` : 'Save failed.');
+            }
           }}
           style={{
             backgroundColor: colors.primary,
