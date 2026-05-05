@@ -38,16 +38,25 @@ import {
 import DraggableFlatList from 'react-native-draggable-flatlist';
 
 const COMMON_INGREDIENT_UNITS: { label: string; value: string | null }[] = [
-  { label: 'g', value: 'g' },
-  { label: 'kg', value: 'kg' },
-  { label: 'ml', value: 'ml' },
-  { label: 'l', value: 'l' },
   { label: 'tsp', value: 'tsp' },
   { label: 'tbsp', value: 'tbsp' },
-  { label: 'cup', value: 'cup' },
-  { label: 'x', value: 'x' },
+  { label: 'cups', value: 'cups' },
+  { label: 'grams', value: 'g' },
   { label: 'none', value: null },
 ];
+
+const LARGE_INGREDIENT_QUANTITY_THRESHOLD = 100;
+
+function getDefaultIngredientUnit(quantity: number): string {
+  return quantity >= LARGE_INGREDIENT_QUANTITY_THRESHOLD ? 'g' : 'tsp';
+}
+
+function getAutoAdjustedIngredientUnit(unit: string | null, quantity: number): string | null {
+  if (unit === 'tsp' && quantity >= LARGE_INGREDIENT_QUANTITY_THRESHOLD) {
+    return 'g';
+  }
+  return unit;
+}
 
 function mergeAiExtractIntoDraft(
   current: Omit<Recipe, 'cookLogs'>,
@@ -137,6 +146,7 @@ export default function RecipeFormScreen() {
   const [rawPasteText, setRawPasteText] = useState('');
   const [parseBusy, setParseBusy] = useState(false);
   const [ingredientQuantityInputs, setIngredientQuantityInputs] = useState<Record<string, string>>({});
+  const [baseServingsInput, setBaseServingsInput] = useState<string | null>(null);
   const [errors, setErrors] = useState<RecipeFormErrors>({});
 
   useEffect(() => {
@@ -182,10 +192,11 @@ export default function RecipeFormScreen() {
     const next: Ingredient = {
       id: newId(),
       quantity: 0,
-      unit: 'g',
+      unit: getDefaultIngredientUnit(0),
       name: '',
       scalable: true,
       amountMode: 'exact',
+      isSectionHeading: false,
       sortOrder: recipe.ingredients.length,
     };
     setRecipe({ ...recipe, ingredients: [...recipe.ingredients, next] });
@@ -272,9 +283,23 @@ export default function RecipeFormScreen() {
       ) : null}
       <LabeledInput
         label="Base servings"
-        value={String(recipe.baseServings)}
+        value={baseServingsInput ?? String(recipe.baseServings)}
         keyboard="decimal-pad"
-        onChange={(t) => setRecipe({ ...recipe, baseServings: Number(t) || 1 })}
+        onChange={(t) => {
+          setBaseServingsInput(t);
+          const parsed = Number(t);
+          if (!Number.isFinite(parsed) || parsed <= 0) return;
+          setRecipe({ ...recipe, baseServings: parsed });
+        }}
+        onBlur={() => {
+          if (baseServingsInput === null) return;
+          const parsed = Number(baseServingsInput);
+          setRecipe({
+            ...recipe,
+            baseServings: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
+          });
+          setBaseServingsInput(null);
+        }}
         colors={colors}
         onFocus={scrollFocusedInputIntoView}
       />
@@ -490,13 +515,15 @@ export default function RecipeFormScreen() {
                                 unit: null,
                                 scalable: false,
                                 notes: undefined,
+                                isSectionHeading: true,
                               }
                             : {
                                 ...ing,
                                 amountMode: ing.amountMode === 'to_taste' ? 'exact' : ing.amountMode,
                                 quantity: ing.quantity > 0 ? ing.quantity : 1,
-                                unit: ing.unit ?? 'g',
+                                unit: ing.unit ?? getDefaultIngredientUnit(ing.quantity > 0 ? ing.quantity : 1),
                                 scalable: true,
+                                isSectionHeading: false,
                               };
                           setRecipe({ ...recipe, ingredients: next });
                           setShowUnitPickerForIngredientId(null);
@@ -518,8 +545,15 @@ export default function RecipeFormScreen() {
                           onValueChange={(toTaste) => {
                             const next = [...recipe.ingredients];
                             next[idx] = toTaste
-                              ? { ...ing, amountMode: 'to_taste', quantity: 0, unit: null, scalable: false }
-                              : { ...ing, amountMode: 'exact', scalable: true };
+                              ? {
+                                  ...ing,
+                                  amountMode: 'to_taste',
+                                  quantity: 0,
+                                  unit: null,
+                                  scalable: false,
+                                  isSectionHeading: false,
+                                }
+                              : { ...ing, amountMode: 'exact', scalable: true, isSectionHeading: false };
                             setRecipe({ ...recipe, ingredients: next });
                             setShowUnitPickerForIngredientId(null);
                             setIngredientQuantityInputs((prev) => {
@@ -560,7 +594,11 @@ export default function RecipeFormScreen() {
                             const parsed = parseQuantityInput(t);
                             if (parsed === null) return;
                             const next = [...recipe.ingredients];
-                            next[idx] = { ...ing, quantity: parsed };
+                            next[idx] = {
+                              ...ing,
+                              quantity: parsed,
+                              unit: getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                            };
                             setRecipe({ ...recipe, ingredients: next });
                           }}
                           onBlur={() => {
@@ -568,7 +606,14 @@ export default function RecipeFormScreen() {
                             if (raw === undefined) return;
                             const parsed = parseQuantityInput(raw);
                             const next = [...recipe.ingredients];
-                            next[idx] = { ...ing, quantity: parsed ?? 0 };
+                            next[idx] = {
+                              ...ing,
+                              quantity: parsed ?? 0,
+                              unit:
+                                parsed === null
+                                  ? ing.unit
+                                  : getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                            };
                             setRecipe({ ...recipe, ingredients: next });
                             setIngredientQuantityInputs((prev) => {
                               const updated = { ...prev };
@@ -913,6 +958,7 @@ function LabeledInput({
   label,
   value,
   onChange,
+  onBlur,
   colors,
   keyboard = 'default',
   onFocus,
@@ -920,6 +966,7 @@ function LabeledInput({
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   colors: ReturnType<typeof useTheme>['colors'];
   keyboard?: 'default' | 'decimal-pad';
   onFocus?: () => void;
@@ -932,6 +979,7 @@ function LabeledInput({
         keyboardType={keyboard}
         onChangeText={onChange}
         onFocus={onFocus}
+        onBlur={onBlur}
         style={{
           borderWidth: 1,
           borderColor: colors.border,

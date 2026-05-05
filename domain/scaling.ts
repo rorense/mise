@@ -210,6 +210,7 @@ export function isLikelySectionHeadingLabel(name: string): boolean {
 }
 
 export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
+  if (ingredient.isSectionHeading === true) return true;
   const name = ingredient.name.trim();
   if (!name) return false;
   if (ingredient.amountMode !== 'exact') return false;

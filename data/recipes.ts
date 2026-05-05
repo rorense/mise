@@ -41,6 +41,7 @@ type IngredientRow = {
   notes: string | null;
   scalable: number;
   amount_mode: IngredientAmountMode;
+  is_section_heading: number;
   sort_order: number;
 };
 
@@ -100,6 +101,7 @@ function mapIngredient(r: IngredientRow): Ingredient {
     notes: r.notes ?? undefined,
     scalable: r.scalable !== 0,
     amountMode: r.amount_mode ?? 'exact',
+    isSectionHeading: r.is_section_heading === 1,
     sortOrder: r.sort_order,
   };
 }
@@ -725,8 +727,8 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
 
     for (const ing of recipe.ingredients) {
       await db.runAsync(
-        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, is_section_heading, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           ing.id,
           recipe.id,
@@ -736,6 +738,7 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
           ing.notes ?? null,
           ing.scalable ? 1 : 0,
           ing.amountMode ?? 'exact',
+          ing.isSectionHeading ? 1 : 0,
           ing.sortOrder,
         ]
       );
@@ -920,12 +923,14 @@ function applySuggestionToDraft(
           quantity: 0,
           unit: null,
           scalable: false,
+          isSectionHeading: false,
         };
       }
       return {
         ...ing,
         amountMode: 'exact',
         scalable: suggestion.nextScalable,
+        isSectionHeading: false,
       };
     });
     return;

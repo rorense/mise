@@ -21,6 +21,7 @@ const MIGRATIONS: Record<number, string> = {
       name TEXT NOT NULL,
       notes TEXT,
       scalable INTEGER NOT NULL DEFAULT 1,
+      is_section_heading INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0
     );
 
@@ -114,6 +115,9 @@ const MIGRATIONS: Record<number, string> = {
     CREATE INDEX IF NOT EXISTS idx_queued_ai_actions_created
       ON queued_ai_actions(created_at ASC);
   `,
+  9: `
+    ALTER TABLE ingredients ADD COLUMN is_section_heading INTEGER NOT NULL DEFAULT 0;
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -141,6 +145,19 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
         );
         const hasAmountMode = columns.some((column) => column.name === 'amount_mode');
         if (hasAmountMode) {
+          await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
+          current = version;
+          continue;
+        }
+      }
+      if (version === 9) {
+        const columns = await db.getAllAsync<{ name: string }>(
+          'PRAGMA table_info(ingredients)'
+        );
+        const hasSectionFlag = columns.some(
+          (column) => column.name === 'is_section_heading'
+        );
+        if (hasSectionFlag) {
           await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
           current = version;
           continue;

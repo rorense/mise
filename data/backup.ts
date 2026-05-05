@@ -156,8 +156,8 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
     }
     for (const row of parsed.tables.ingredients) {
       await db.runAsync(
-        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, is_section_heading, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           row.id,
           row.recipe_id,
@@ -167,6 +167,7 @@ export async function restoreBackupJson(rawJson: string): Promise<void> {
           row.notes ?? null,
           row.scalable ?? 1,
           row.amount_mode === 'to_taste' ? 'to_taste' : 'exact',
+          row.is_section_heading === 1 ? 1 : 0,
           row.sort_order ?? 0,
         ]
       );

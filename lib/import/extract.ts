@@ -18,8 +18,10 @@ Rules:
 - All measurements MUST be metric only: g, kg, ml, l, cm, °C, tsp, tbsp, pinch. Never use imperial.
 - Convert all amounts to metric in the numbers you output.
 - Step instructions should be plain language without quantity placeholders.
-- For eggs, cloves, sprigs use unit null and round-friendly base quantities; set scalable true unless item is salt, baking powder, yeast, or spice — then scalable false.
-- Use amountMode "to_taste" when an ingredient is by feel (e.g., salt, pepper, chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
+- For eggs, cloves, sprigs use unit null and round-friendly base quantities.
+- Default scalable to true for exact ingredients; only use scalable false for explicit non-scaling entries and heading rows.
+- Salt and pepper ingredients should always use amountMode "to_taste".
+- Use amountMode "to_taste" when an ingredient is by feel (e.g., chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
 - If ingredients are split into components/parts (e.g. "Sponge Cake", "Simple Syrup", "Whipping Cream"), set each ingredient item's "section" field to that component title.
 - If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
 - Do NOT turn an ingredient into a heading just because quantity is unknown/missing. If unsure, keep it as an ingredient row.
@@ -96,6 +98,10 @@ function parseInlineIngredientText(text: string): {
   return { quantity, unit, name: rest };
 }
 
+function isSaltOrPepperIngredient(name: string): boolean {
+  return /\bsalt\b/i.test(name) || /\bpeppers?\b/i.test(name);
+}
+
 function parseIngredients(raw: unknown): Ingredient[] | null {
   if (!Array.isArray(raw)) return null;
   const out: Ingredient[] = [];
@@ -123,6 +129,7 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
         notes: undefined,
         scalable: false,
         amountMode: 'exact',
+        isSectionHeading: true,
         sortOrder: sortOrder++,
       });
       activeSection = section;
@@ -131,7 +138,9 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
     const amountMode = row.amountMode === 'to_taste' ? 'to_taste' : 'exact';
     const looksLikeToTasteText =
       /to taste/i.test(rawName) || /to taste/i.test(notes ?? '');
-    const resolvedAmountMode = looksLikeToTasteText ? 'to_taste' : amountMode;
+    const shouldForceToTaste = isSaltOrPepperIngredient(rawName);
+    const resolvedAmountMode =
+      looksLikeToTasteText || shouldForceToTaste ? 'to_taste' : amountMode;
     const recoveredFromNotes =
       typeof notes === 'string' ? parseInlineIngredientText(notes) : null;
     const nextRow = index + 1 < raw.length ? raw[index + 1] : null;
@@ -161,6 +170,7 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
           notes: undefined,
           scalable: false,
           amountMode: 'exact',
+          isSectionHeading: true,
           sortOrder: sortOrder++,
         });
       }
@@ -174,6 +184,7 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
           notes: undefined,
           scalable: true,
           amountMode: 'exact',
+          isSectionHeading: false,
           sortOrder: sortOrder++,
         });
       }
@@ -185,13 +196,9 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
       unit: resolvedAmountMode === 'to_taste' ? null : unit,
       name: rawName,
       notes,
-      scalable:
-        resolvedAmountMode === 'to_taste'
-          ? false
-          : looksLikeSectionHeading
-            ? false
-            : row.scalable !== false,
+      scalable: resolvedAmountMode === 'to_taste' ? false : !looksLikeSectionHeading,
       amountMode: resolvedAmountMode,
+      isSectionHeading: false,
       sortOrder: sortOrder++,
     });
   }

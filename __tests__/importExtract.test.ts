@@ -196,7 +196,7 @@ describe('parseRecipeJson ingredient components', () => {
     });
   });
 
-  it('keeps zero-quantity ingredients as ingredients without heading cues', () => {
+  it('forces salt and pepper ingredients to to_taste', () => {
     const parsed = parseRecipeJson(
       JSON.stringify({
         title: 'Simple Soup',
@@ -233,7 +233,7 @@ describe('parseRecipeJson ingredient components', () => {
       name: 'salt',
       notes: 'start with a small pinch',
       scalable: false,
-      amountMode: 'exact',
+      amountMode: 'to_taste',
     });
   });
 });

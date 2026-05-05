@@ -16,6 +16,7 @@ export interface Ingredient {
   notes?: string;
   scalable: boolean;
   amountMode: IngredientAmountMode;
+  isSectionHeading?: boolean;
   sortOrder: number;
 }
 
