@@ -42,6 +42,9 @@ const COMMON_INGREDIENT_UNITS: { label: string; value: string | null }[] = [
   { label: 'tbsp', value: 'tbsp' },
   { label: 'cups', value: 'cups' },
   { label: 'grams', value: 'g' },
+  { label: 'kg', value: 'kg' },
+  { label: 'ml', value: 'ml' },
+  { label: 'x', value: 'x' },
   { label: 'none', value: null },
 ];
 

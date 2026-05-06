@@ -27,7 +27,7 @@ export default function OnboardingScreen() {
             color: colors.textPrimary,
           }}
         >
-          Welcome to Mise
+          Welcome to Mise en
         </Text>
         <Text
           style={{
@@ -75,7 +75,7 @@ export default function OnboardingScreen() {
           }}
         >
           <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            Start using Mise
+            Start using Mise en
           </Text>
         </Pressable>
       </ScrollView>

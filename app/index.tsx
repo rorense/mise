@@ -233,7 +233,7 @@ export default function LibraryScreen() {
               color: colors.textPrimary,
             }}
           >
-            Mise
+            Mise en
           </Text>
           <Pressable
             onPress={() => setSortMenu(true)}

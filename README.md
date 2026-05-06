@@ -1,4 +1,4 @@
-# Mise
+# Mise en
 
 A cross-platform mobile app for keeping a personal recipe library and cook log. Recipes stay on your device (local SQLite), with search, tags, cuisines, and optional photos when you record a cook.
 

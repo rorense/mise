@@ -21,7 +21,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   }
 }
 
-rootProject.name = 'Mise'
+rootProject.name = 'Mise en'
 
 dependencyResolutionManagement {
   versionCatalogs {

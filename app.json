@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Mise",
+    "name": "Mise en",
     "slug": "mise",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -40,8 +40,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Mise to attach cook photos to your log.",
-          "cameraPermission": "Allow Mise to take cook photos."
+          "photosPermission": "Allow Mise en to attach cook photos to your log.",
+          "cameraPermission": "Allow Mise en to take cook photos."
         }
       ],
       "expo-font",

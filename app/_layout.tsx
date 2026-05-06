@@ -85,7 +85,7 @@ function InitialLoadingScreen({ dark }: { dark: boolean }) {
           marginBottom: 12,
         }}
       >
-        Mise
+        Mise en
       </Text>
       <ActivityIndicator size="small" color="#C4622D" />
       <Text

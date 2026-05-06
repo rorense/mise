@@ -244,7 +244,7 @@ export default function SettingsScreen() {
       <Pressable
         onPress={() =>
           setDialog({
-            title: 'Mise',
+            title: 'Mise en',
             message: 'Personal recipe journal — local only.',
           })
         }

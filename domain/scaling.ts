@@ -170,6 +170,11 @@ export function formatQuantity(
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
+/** UI/chat suffix: only for ingredients explicitly marked to taste, not for exact amounts that do not scale. */
+export function ingredientShowsAdjustToTasteHint(ingredient: Ingredient): boolean {
+  return ingredient.amountMode === 'to_taste';
+}
+
 export function formatIngredientAmount(
   ingredient: Ingredient,
   baseServings: number,
@@ -283,10 +288,7 @@ export function buildChatIngredientLines(
     section.ingredients.forEach((ingredient) => {
       const qty = formatIngredientAmount(ingredient, baseServings, currentServings);
       const notes = ingredient.notes ? ` (${ingredient.notes})` : '';
-      const hint =
-        !ingredient.scalable && ingredient.amountMode !== 'to_taste'
-          ? ' [adjust to taste]'
-          : '';
+      const hint = ingredientShowsAdjustToTasteHint(ingredient) ? ' [adjust to taste]' : '';
       lines.push(`- ${qty} ${ingredient.name}${notes}${hint}`);
     });
   });

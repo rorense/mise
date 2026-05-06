@@ -22,6 +22,7 @@ import {
 import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import {
   formatIngredientAmount,
+  ingredientShowsAdjustToTasteHint,
   renderStepInstruction,
   splitIngredientSections,
 } from '@/domain/scaling';
@@ -999,7 +1000,7 @@ export default function RecipeDetailScreen() {
                         >
                           {!checklistMode ? '· ' : ''}
                           {amount} {ing.name}
-                          {!ing.scalable && ing.amountMode !== 'to_taste' ? '  ⚠ adjust to taste' : ''}
+                          {ingredientShowsAdjustToTasteHint(ing) ? '  ⚠ adjust to taste' : ''}
                         </Text>
                       </Pressable>
                     );
