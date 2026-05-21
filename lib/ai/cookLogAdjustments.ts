@@ -14,6 +14,8 @@ Rules:
 - confidence must be 0..1.
 - Keep step edits small and specific, not full rewrites.
 - Use metric conventions and realistic quantities.
+- When suggesting any recipe change, also include ingredient list updates whenever the note implies ingredient amounts or amount modes should change.
+- If a suggested step change depends on ingredient amount/taste handling, include matching ingredient_quantity or ingredient_amount_mode suggestions for the same evidence.
 - Do not add/remove ingredients or steps.`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
