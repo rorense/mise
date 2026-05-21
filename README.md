@@ -27,7 +27,7 @@ This project uses a [development client](https://docs.expo.dev/develop/developme
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mise.git
+git clone https://github.com/rorense/mise.git
 cd mise
 npm install
 ```
@@ -61,6 +61,47 @@ First-time native builds may take a while. Use [Expo prebuild](https://docs.expo
 ## EAS Build
 
 [EAS](https://expo.dev/eas) profiles are defined in `eas.json` (`development`, `preview`, `production`). Configure your Expo account and run builds from the EAS CLI when you are ready to ship.
+
+### Android build workflow
+
+Use this flow when you need an Android build again:
+
+1. Install dependencies and verify project health:
+
+   ```bash
+   npm install
+   npx expo-doctor
+   ```
+
+2. Confirm Expo auth:
+
+   ```bash
+   npx eas login
+   npx eas whoami
+   ```
+
+3. Run the build profile you need:
+
+   - **Internal APK (`preview`)**:
+     ```bash
+     npx eas build -p android --profile preview
+     ```
+   - **Production AAB (`production`)**:
+     ```bash
+     npx eas build -p android --profile production
+     ```
+   - **Dev client (`development`)**:
+     ```bash
+     npx eas build -p android --profile development
+     ```
+
+4. Open the build link from terminal output to download/install the artifact.
+
+For local emulator/device testing (not a release artifact), run:
+
+```bash
+npm run android
+```
 
 ## Tech stack (high level)
 
