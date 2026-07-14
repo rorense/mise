@@ -1,4 +1,9 @@
-import { parseRecipeJson } from '@/lib/import/extract';
+import {
+  analyzeSourceMethod,
+  parseRecipeJson,
+  stepsAreDetailedEnough,
+} from '@/lib/import/extract';
+import type { Step } from '@/types/recipe';
 
 describe('parseRecipeJson ingredient components', () => {
   it('preserves explicit component heading rows from model output', () => {
@@ -235,5 +240,66 @@ describe('parseRecipeJson ingredient components', () => {
       scalable: false,
       amountMode: 'to_taste',
     });
+  });
+});
+
+const BRISKET_SOURCE = `SLOW COOKER BEEF BRISKET PASTA
+
+Serves: 4
+
+Cook Time: 8 hours on low or 4 hours on high
+
+Ingredients
+1.2 kg beef brisket
+
+Method:
+1. Pat the beef brisket dry and season with salt and pepper. Heat olive oil in a frying pan over medium-high heat. Sear the brisket on all sides until well browned.
+
+2. Transfer the seared brisket to your slow cooker. Add onion, garlic, tinned tomatoes, tomato paste, red wine, beef stock, and dried Italian herbs.
+
+3. Cover and cook on low for 8 hours or high for 4 hours, until the brisket is fall-apart tender.
+
+4. Remove the brisket, shred it using two forks, then return it to the sauce in the slow cooker. Stir well to combine.
+
+5. Meanwhile, cook your pasta separately according to packet instructions. Drain and add it to the slow cooker. Stir through the brisket sauce until well coated.
+
+6. Dish it up with a generous sprinkle of grated Parmesan and fresh parsley. Season to taste.`;
+
+function makeSteps(instructions: string[]): Step[] {
+  return instructions.map((instruction, order) => ({
+    id: `step-${order}`,
+    order,
+    instruction,
+    scalableQuantities: [],
+  }));
+}
+
+describe('import method validation', () => {
+  it('detects substantial method text in pasted recipes', () => {
+    const analysis = analyzeSourceMethod(BRISKET_SOURCE);
+    expect(analysis.hasSubstantialMethod).toBe(true);
+    expect(analysis.numberedStepCount).toBeGreaterThanOrEqual(6);
+  });
+
+  it('accepts condensed model steps when the source method is substantial', () => {
+    const condensed = makeSteps([
+      'Prepare the brisket in a pan until coloured on all sides.',
+      'Add everything to the slow cooker and leave to cook.',
+      'Pull the brisket apart and mix back into the sauce.',
+      'Cook pasta and combine with the sauce.',
+      'Serve with cheese and herbs.',
+    ]);
+
+    expect(
+      stepsAreDetailedEnough(condensed, { sourceHasSubstantialMethod: true })
+    ).toBe(true);
+    expect(stepsAreDetailedEnough(condensed)).toBe(false);
+  });
+
+  it('still rejects empty methods without a substantial source', () => {
+    expect(stepsAreDetailedEnough(makeSteps([]))).toBe(false);
+    expect(
+      stepsAreDetailedEnough(makeSteps(['Cook until done.']))
+    ).toBe(false);
   });
 });

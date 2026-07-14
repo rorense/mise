@@ -18,7 +18,7 @@ Rules:
 - Use only these units: g, kg, ml, l, cm, °C, cup, cups, tsp, tbsp, pinch. Never use imperial.
 - Preserve cup/cups/tsp/tbsp/pinch from the source when present; do NOT convert these to ml.
 - Convert other non-metric units to metric in the numbers you output.
-- Step instructions should be plain language without quantity placeholders.
+- Step instructions should be plain language without quantity placeholders, but still include timing, heat level, and doneness cues from the source in the step text.
 - For eggs, cloves, sprigs use unit null and round-friendly base quantities.
 - Default scalable to true for exact ingredients; only use scalable false for explicit non-scaling entries and heading rows.
 - Salt and pepper ingredients should always use amountMode "to_taste".
@@ -245,6 +245,27 @@ function countWords(text: string): number {
     .filter(Boolean).length;
 }
 
+export function analyzeSourceMethod(content: string): {
+  hasSubstantialMethod: boolean;
+  numberedStepCount: number;
+  methodWordCount: number;
+} {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const methodSection =
+    normalized.match(
+      /(?:^|\n)\s*(?:method|instructions|directions|steps)\s*:?\s*\n([\s\S]*?)(?=\n\s*(?:notes|tips|nutrition|ingredients|to serve)\s*:|\s*$)/i
+    )?.[1] ?? normalized;
+  const numberedStepCount = (
+    methodSection.match(/(?:^|\n)\s*\d+[\.\):\-]\s+\S/g) ?? []
+  ).length;
+  const methodWordCount = countWords(methodSection);
+  const hasSubstantialMethod =
+    numberedStepCount >= 2 ||
+    (numberedStepCount >= 1 && methodWordCount >= 25) ||
+    methodWordCount >= 50;
+  return { hasSubstantialMethod, numberedStepCount, methodWordCount };
+}
+
 function isVagueMethodStep(step: string): boolean {
   const text = step.trim();
   if (!text) return true;
@@ -264,7 +285,7 @@ function stepHasConcreteDetail(step: string): boolean {
   if (!text) return false;
   if (/\d/.test(text)) return true;
   if (
-    /\b(minute|minutes|hour|hours|second|seconds|°c|celsius|oven|preheat|low heat|medium heat|high heat|simmer|boil|golden|browned|translucent|thickened|softened|fragrant)\b/i.test(
+    /\b(minute|minutes|hour|hours|second|seconds|°c|celsius|fahrenheit|°f|oven|preheat|low(?:\s|-)?heat|medium(?:\s|-)?heat|high(?:\s|-)?heat|simmer|boil|golden|browned|brown|translucent|thickened|softened|fragrant|tender|crisp|al dente|sear|shred|drain)\b/i.test(
       text
     )
   ) {
@@ -273,10 +294,22 @@ function stepHasConcreteDetail(step: string): boolean {
   return false;
 }
 
-function stepsAreDetailedEnough(steps: Step[]): boolean {
-  if (steps.length === 0) return false;
+export function stepsAreDetailedEnough(
+  steps: Step[],
+  options?: { sourceHasSubstantialMethod?: boolean }
+): boolean {
   const instructions = steps.map((step) => step.instruction.trim()).filter(Boolean);
   if (instructions.length === 0) return false;
+
+  if (options?.sourceHasSubstantialMethod) {
+    const totalWords = instructions.reduce((sum, line) => sum + countWords(line), 0);
+    const vagueCount = instructions.filter(isVagueMethodStep).length;
+    if (vagueCount === instructions.length && totalWords < 20) {
+      return false;
+    }
+    return totalWords >= 12;
+  }
+
   const shortCount = instructions.filter((line) => countWords(line) < 4).length;
   if (shortCount > Math.max(1, Math.floor(instructions.length / 3))) {
     return false;
@@ -289,7 +322,7 @@ function stepsAreDetailedEnough(steps: Step[]): boolean {
   if (instructions.length === 1) {
     return concreteCount === 1 && countWords(instructions[0]) >= 10;
   }
-  return concreteCount >= Math.max(1, Math.ceil(instructions.length * 0.5));
+  return concreteCount >= Math.max(1, Math.ceil(instructions.length * 0.34));
 }
 
 export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
@@ -347,8 +380,9 @@ Source URL (may be empty): ${payload.sourceUrl}
 
 Content:
 ${payload.content.slice(0, 24000)}`;
+  const sourceMethod = analyzeSourceMethod(payload.content);
   let methodFeedback = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const user = methodFeedback
       ? `${baseUser}
 
@@ -369,17 +403,23 @@ ${methodFeedback}`
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
     const parsed = parseRecipeJson(cleaned);
     if (!parsed) {
-      if (attempt === 1) {
+      if (attempt === 2) {
         throw new Error('Could not parse recipe JSON from model output');
       }
       methodFeedback =
         'Return valid JSON only and ensure method steps are fully detailed and specific.';
       continue;
     }
-    if (!stepsAreDetailedEnough(parsed.steps)) {
-      if (attempt === 1) {
+    if (
+      !stepsAreDetailedEnough(parsed.steps, {
+        sourceHasSubstantialMethod: sourceMethod.hasSubstantialMethod,
+      })
+    ) {
+      if (attempt === 2) {
         throw new Error(
-          'Imported method is too brief. Please provide more detailed method text and try again.'
+          sourceMethod.hasSubstantialMethod
+            ? 'Could not extract a usable method from this recipe. Check the source text and try again.'
+            : 'Imported method is too brief. Add numbered steps with timing, heat, and doneness cues, then try again.'
         );
       }
       methodFeedback =
