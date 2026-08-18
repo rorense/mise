@@ -17,7 +17,6 @@ const COUNTABLE_UNITS = new Set(
   ].map((u) => u.toLowerCase())
 );
 
-const EGG_PATTERN = /egg/i;
 const UNIT_ALIASES: Record<string, string[]> = {
   g: ['g', 'gram', 'grams'],
   kg: ['kg', 'kilogram', 'kilograms'],
@@ -100,25 +99,40 @@ function toKitchenFraction(quantity: number): string {
   return `${sign}${nextWhole} ${numerator}/${denominator}`;
 }
 
-function stripPlaceholderAndUnit(
+/**
+ * True when the text right after a placeholder already spells out the unit, as
+ * in "Add {{qty_1}} g sugar" — in which case substituting the number alone
+ * avoids "50 g g sugar".
+ */
+function beginsWithUnit(text: string, unit: string): boolean {
+  const canonical = normalizeUnit(unit);
+  if (!canonical) return false;
+  const aliases = UNIT_ALIASES[canonical] ?? [canonical];
+  return aliases.some((alias) =>
+    new RegExp(
+      String.raw`^\s*${escapeRegExp(alias)}(?=$|[\s)\]}.,;:!?])`,
+      'i'
+    ).test(text)
+  );
+}
+
+function substitutePlaceholder(
   instruction: string,
   placeholder: string,
+  quantity: number,
   unit: string
 ): string {
-  let next = instruction.split(placeholder).join(' ');
-  const normalizedUnit = unit.trim().toLowerCase();
-  if (normalizedUnit) {
-    const aliases = UNIT_ALIASES[normalizedUnit] ?? [normalizedUnit];
-    for (const alias of aliases) {
-      const escaped = escapeRegExp(alias);
-      const standaloneUnit = new RegExp(
-        String.raw`(^|[\s([{,])${escaped}(?=$|[\s)\]}.,;:!?])`,
-        'gi'
-      );
-      next = next.replace(standaloneUnit, '$1');
-    }
+  const segments = instruction.split(placeholder);
+  if (segments.length === 1) return instruction;
+  let out = segments[0];
+  for (let i = 1; i < segments.length; i += 1) {
+    const following = segments[i];
+    const rendered = beginsWithUnit(following, unit)
+      ? formatQuantityValue(quantity, unit)
+      : formatQuantity(quantity, unit || null);
+    out += rendered + following;
   }
-  return next;
+  return out;
 }
 
 function cleanInstructionSpacing(text: string): string {
@@ -148,25 +162,28 @@ export function scaleForIngredient(
   if (ingredient.amountMode === 'to_taste') return 0;
   if (!ingredient.scalable) return ingredient.quantity;
   let q = scaleQuantity(ingredient.quantity, baseServings, currentServings);
+  // A missing unit normalises to '', which is itself a countable unit — so the
+  // unitless cases (eggs, cloves) are already covered by this one check.
   const u = ingredient.unit?.toLowerCase() ?? '';
-  if (
-    COUNTABLE_UNITS.has(u) ||
-    ((u === null || u === '') && EGG_PATTERN.test(ingredient.name))
-  ) {
+  if (COUNTABLE_UNITS.has(u)) {
     q = Math.max(0, Math.round(q));
   }
   return q;
+}
+
+/** The number on its own, rounded the way its unit calls for. */
+function formatQuantityValue(quantity: number, unit: string | null): string {
+  const canonicalUnit = normalizeUnit(unit);
+  return canonicalUnit && FRACTIONAL_DISPLAY_UNITS.has(canonicalUnit)
+    ? toKitchenFraction(quantity)
+    : formatNumericQuantity(quantity);
 }
 
 export function formatQuantity(
   quantity: number,
   unit: string | null
 ): string {
-  const canonicalUnit = normalizeUnit(unit);
-  const rounded =
-    canonicalUnit && FRACTIONAL_DISPLAY_UNITS.has(canonicalUnit)
-      ? toKitchenFraction(quantity)
-      : formatNumericQuantity(quantity);
+  const rounded = formatQuantityValue(quantity, unit);
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
@@ -200,18 +217,32 @@ function looksLikeTitleCaseHeading(name: string): boolean {
   return uppercaseWordCount >= 2;
 }
 
-export function isLikelySectionHeadingLabel(name: string): boolean {
+/**
+ * Signals that only a heading would carry: a trailing colon or dash, a leading
+ * "For …", or step/part numbering. Deliberately excludes title case, which any
+ * ordinary ingredient can have.
+ */
+function isStrongSectionHeadingLabel(name: string): boolean {
   const trimmed = name.trim();
   if (!trimmed) return false;
   if (/to taste/i.test(trimmed)) return false;
-  const looksLikeNumberedHeading =
-    /^\d+\s*[\).:-]/.test(trimmed) ||
-    /^(step|part|section)\s*\d+\b/i.test(trimmed);
-  if (looksLikeNumberedHeading) return true;
+  if (/^\d+\s*[).:-]/.test(trimmed)) return true;
+  if (/^(step|part|section)\s*\d+\b/i.test(trimmed)) return true;
   if (/[:\-–—]\s*$/.test(trimmed)) return true;
   if (/^for\b/i.test(trimmed)) return true;
-  if (looksLikeTitleCaseHeading(trimmed)) return true;
   return false;
+}
+
+/**
+ * Used at import time, where the model has also told us the row is a heading
+ * and title case is a useful extra hint. Not safe to use on its own for display
+ * — see isIngredientSectionHeading.
+ */
+export function isLikelySectionHeadingLabel(name: string): boolean {
+  if (isStrongSectionHeadingLabel(name)) return true;
+  const trimmed = name.trim();
+  if (!trimmed || /to taste/i.test(trimmed)) return false;
+  return looksLikeTitleCaseHeading(trimmed);
 }
 
 export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
@@ -221,7 +252,9 @@ export function isIngredientSectionHeading(ingredient: Ingredient): boolean {
   if (ingredient.amountMode !== 'exact') return false;
   if (ingredient.quantity > 0) return false;
   if (ingredient.unit) return false;
-  return isLikelySectionHeadingLabel(name);
+  // Only strong signals here. Inferring from title case alone silently hid
+  // real ingredients — "Olive Oil" with no amount rendered as a header.
+  return isStrongSectionHeadingLabel(name);
 }
 
 function normalizeSectionTitle(raw: string): string {
@@ -256,18 +289,23 @@ export function splitIngredientSections(ingredients: Ingredient[]): {
   return sections;
 }
 
+/**
+ * Renders a step with its quantities scaled to the current serving count, so
+ * "Whisk in {{qty_1}}." reads "Whisk in 60 ml." at double the base servings.
+ */
 export function renderStepInstruction(
   step: Step,
-  _baseServings: number,
-  _currentServings: number
+  baseServings: number,
+  currentServings: number
 ): string {
   let text = step.instruction;
   for (const sq of step.scalableQuantities) {
-    const shouldStripUnit = !!sq.unit;
-    text = shouldStripUnit
-      ? stripPlaceholderAndUnit(text, sq.placeholder, sq.unit)
-      : text.split(sq.placeholder).join(' ');
+    const scaled = scaleQuantity(sq.baseQuantity, baseServings, currentServings);
+    text = substitutePlaceholder(text, sq.placeholder, scaled, sq.unit);
   }
+  // A placeholder with no matching entry — from a hand-edited step, or a model
+  // response that lost one — would otherwise render as raw {{qty_1}} text.
+  text = text.replace(/\{\{[^{}]*\}\}/g, '');
   return cleanInstructionSpacing(text);
 }
 

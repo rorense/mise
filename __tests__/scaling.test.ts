@@ -69,7 +69,7 @@ describe('formatQuantity', () => {
 });
 
 describe('renderStepInstruction', () => {
-  it('removes quantity placeholders from method text', () => {
+  it('scales a quantity whose unit already follows it in the text', () => {
     expect(
       renderStepInstruction(
         {
@@ -83,10 +83,10 @@ describe('renderStepInstruction', () => {
         4,
         2
       )
-    ).toBe('Add sugar and mix.');
+    ).toBe('Add 50 g sugar and mix.');
   });
 
-  it('keeps method readable when placeholder is standalone', () => {
+  it('supplies the unit when the placeholder stands alone', () => {
     expect(
       renderStepInstruction(
         {
@@ -100,7 +100,71 @@ describe('renderStepInstruction', () => {
         2,
         4
       )
-    ).toBe('Whisk in.');
+    ).toBe('Whisk in 60 ml.');
+  });
+
+  it('uses kitchen fractions for spoon and cup units', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's3',
+          order: 0,
+          instruction: 'Stir in {{qty_1}} tsp vanilla.',
+          scalableQuantities: [
+            { placeholder: '{{qty_1}}', baseQuantity: 1, unit: 'tsp' },
+          ],
+        },
+        4,
+        2
+      )
+    ).toBe('Stir in 1/2 tsp vanilla.');
+  });
+
+  it('substitutes every occurrence of the same placeholder', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's4',
+          order: 0,
+          instruction: 'Add {{qty_1}} g now and {{qty_1}} g later.',
+          scalableQuantities: [
+            { placeholder: '{{qty_1}}', baseQuantity: 20, unit: 'g' },
+          ],
+        },
+        2,
+        4
+      )
+    ).toBe('Add 40 g now and 40 g later.');
+  });
+
+  it('never leaks an unmatched placeholder into the rendered step', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's5',
+          order: 0,
+          instruction: 'Fold in {{qty_9}} gently.',
+          scalableQuantities: [],
+        },
+        4,
+        4
+      )
+    ).toBe('Fold in gently.');
+  });
+
+  it('leaves steps without placeholders untouched', () => {
+    expect(
+      renderStepInstruction(
+        {
+          id: 's6',
+          order: 0,
+          instruction: 'Rest the dough for 20 minutes.',
+          scalableQuantities: [],
+        },
+        4,
+        8
+      )
+    ).toBe('Rest the dough for 20 minutes.');
   });
 });
 
@@ -114,6 +178,7 @@ describe('splitIngredientSections', () => {
         name: 'Sponge Cake',
         scalable: false,
         amountMode: 'exact',
+        isSectionHeading: true,
         sortOrder: 0,
       },
       {
@@ -216,6 +281,7 @@ describe('buildChatIngredientLines', () => {
         name: 'Sponge Cake',
         scalable: false,
         amountMode: 'exact',
+        isSectionHeading: true,
         sortOrder: 0,
       },
       {

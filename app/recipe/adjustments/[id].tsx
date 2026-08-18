@@ -86,6 +86,8 @@ export default function RecipeAdjustmentsReviewScreen() {
           No pending suggestions
         </Text>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to library"
           onPress={() => router.replace('/')}
           style={{
             backgroundColor: colors.primary,
@@ -146,6 +148,9 @@ export default function RecipeAdjustmentsReviewScreen() {
           return (
             <Pressable
               key={suggestion.id}
+              accessibilityRole="checkbox"
+              accessibilityLabel={`${title}: change ${before || 'nothing'} to ${after}`}
+              accessibilityState={{ checked: selected }}
               onPress={() =>
                 setSelectedSuggestionIds((prev) =>
                   selected
@@ -190,6 +195,9 @@ export default function RecipeAdjustmentsReviewScreen() {
         })}
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Apply ${selectedSuggestionIds.length} selected updates`}
+          accessibilityState={{ disabled: !applyEnabled }}
           disabled={!applyEnabled}
           onPress={async () => {
             setBusyAction('apply');
@@ -216,6 +224,9 @@ export default function RecipeAdjustmentsReviewScreen() {
         </Pressable>
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Ignore these suggested updates"
+          accessibilityState={{ disabled: busyAction !== null }}
           disabled={busyAction !== null}
           onPress={async () => {
             setBusyAction('ignore');

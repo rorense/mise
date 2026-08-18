@@ -26,7 +26,9 @@ Rules:
 - If ingredients are split into components/parts (e.g. "Sponge Cake", "Simple Syrup", "Whipping Cream"), set each ingredient item's "section" field to that component title.
 - If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
 - Do NOT turn an ingredient into a heading just because quantity is unknown/missing. If unsure, keep it as an ingredient row.
-- Set scalableQuantities to [] for each step unless placeholders are already present in source text.
+- Where a step names an ingredient amount that should scale with servings, replace the number with a placeholder like {{qty_1}} (numbered per step) and list it in that step's scalableQuantities with its baseQuantity and unit. Keep the unit in the sentence: "Add {{qty_1}} g flour".
+- Do NOT use placeholders for anything that does not scale: times, temperatures, tin sizes, counts of equipment.
+- If a step has no scalable amount, set scalableQuantities to [].
 - Method quality is critical: keep steps specific and practical. Preserve actionable details from source text including heat level, timing, temperatures, texture/visual cues, mixing order, and doneness checks.
 - Do not collapse multiple distinct actions into vague single lines.
 - Avoid vague instructions like "cook until done" unless the source gives no better detail. Prefer concrete wording.

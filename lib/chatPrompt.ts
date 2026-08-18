@@ -14,7 +14,7 @@ export function recipeToChatSystemPrompt(
     recipe.baseServings,
     currentServings
   );
-  const stepsBlock = recipe.steps
+  const stepsBlock = [...recipe.steps]
     .sort((a, b) => a.order - b.order)
     .map((s, i) => {
       const text = renderStepInstruction(

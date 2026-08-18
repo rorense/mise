@@ -27,6 +27,8 @@ export function ConfirmDialog({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss"
         onPress={onCancel}
         style={{
           flex: 1,
@@ -36,6 +38,9 @@ export function ConfirmDialog({
         }}
       >
         <Pressable
+          // See AppDialog: grouping would make the buttons unreachable.
+          accessible={false}
+          accessibilityViewIsModal
           onPress={() => undefined}
           style={{
             backgroundColor: colors.surface,
@@ -60,6 +65,8 @@ export function ConfirmDialog({
           </Text>
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={cancelLabel}
               onPress={onCancel}
               style={{
                 paddingHorizontal: 14,
@@ -75,6 +82,8 @@ export function ConfirmDialog({
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={confirmLabel}
               onPress={onConfirm}
               style={{
                 paddingHorizontal: 14,

@@ -5,11 +5,12 @@ import {
 } from '@/data/recipes';
 import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
-import { getActiveAiProvider, getBundledAiKey } from '@/lib/aiConfig';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { formatQuantity, isIngredientSectionHeading } from '@/domain/scaling';
 import { importFromManualText } from '@/lib/import/pipeline';
 import { newId } from '@/lib/id';
-import { takeImportDraft } from '@/lib/importDraftStore';
+import { restoreImportDraft, takeImportDraft } from '@/lib/importDraftStore';
 import { getSeenStepDragHint, setSeenStepDragHint } from '@/lib/secrets';
 import {
   KEYBOARD_AVOIDING_BEHAVIOR,
@@ -21,9 +22,10 @@ import { useTheme } from '@/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -143,6 +145,7 @@ export default function RecipeFormScreen() {
   const [activeIngredientId, setActiveIngredientId] = useState<string | null>(null);
   const [showUnitPickerForIngredientId, setShowUnitPickerForIngredientId] = useState<string | null>(null);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [showStepDragHint, setShowStepDragHint] = useState(false);
   const [showPasteAi, setShowPasteAi] = useState(false);
   const [startedFromImport, setStartedFromImport] = useState(false);
@@ -151,6 +154,33 @@ export default function RecipeFormScreen() {
   const [ingredientQuantityInputs, setIngredientQuantityInputs] = useState<Record<string, string>>({});
   const [baseServingsInput, setBaseServingsInput] = useState<string | null>(null);
   const [errors, setErrors] = useState<RecipeFormErrors>({});
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  // Snapshot of the recipe as loaded. Comparing against it tells us whether
+  // leaving would throw away work.
+  const [baseline, setBaseline] = useState<string | null>(null);
+
+  const isDirty = baseline !== null && JSON.stringify(recipe) !== baseline;
+
+  const leaveScreen = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
+
+  const requestLeave = useCallback(() => {
+    if (isDirty) setShowDiscardConfirm(true);
+    else leaveScreen();
+  }, [isDirty, leaveScreen]);
+
+  // Android's hardware/gesture back has to go through the same check as the
+  // in-app arrow, or edits vanish silently.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!isDirty) return false;
+      setShowDiscardConfirm(true);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [isDirty]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,13 +202,17 @@ export default function RecipeFormScreen() {
         }
         const { cookLogs: _c, ...rest } = r;
         setRecipe(rest);
+        setBaseline(JSON.stringify(rest));
       } else {
-        const importedDraft = takeImportDraft();
+        const importedDraft = takeImportDraft() ?? (await restoreImportDraft());
         if (importedDraft) {
           setStartedFromImport(true);
           setRecipe(importedDraft);
+          setBaseline(JSON.stringify(importedDraft));
         } else {
-          setRecipe(await createManualRecipeDraft());
+          const blank = await createManualRecipeDraft();
+          setRecipe(blank);
+          setBaseline(JSON.stringify(blank));
         }
       }
     })();
@@ -259,7 +293,7 @@ export default function RecipeFormScreen() {
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
+      <BackButton onPress={requestLeave} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -307,6 +341,9 @@ export default function RecipeFormScreen() {
         onFocus={scrollFocusedInputIntoView}
       />
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Advanced options"
+        accessibilityState={{ expanded: showAdvanced }}
         onPress={() => setShowAdvanced((v) => !v)}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
       >
@@ -347,6 +384,9 @@ export default function RecipeFormScreen() {
         </>
       ) : null}
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Paste and parse with AI"
+        accessibilityState={{ expanded: showPasteAi }}
         onPress={() => setShowPasteAi((v) => !v)}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
       >
@@ -365,6 +405,7 @@ export default function RecipeFormScreen() {
             Paste ingredients and instructions in one block; we will split them into ingredients and steps.
           </Text>
           <TextInput
+            accessibilityLabel="Recipe text to parse"
             multiline
             value={rawPasteText}
             onChangeText={setRawPasteText}
@@ -384,6 +425,9 @@ export default function RecipeFormScreen() {
             }}
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={parseBusy ? 'Parsing recipe text' : 'Parse pasted text'}
+            accessibilityState={{ disabled: parseBusy, busy: parseBusy }}
             disabled={parseBusy}
             onPress={async () => {
               const text = rawPasteText.trim();
@@ -402,21 +446,19 @@ export default function RecipeFormScreen() {
                 });
                 return;
               }
-              const provider = await getActiveAiProvider();
-              const key = getBundledAiKey(provider);
-              if (!key) {
-                setDialog({
-                  title: 'API key',
-                  message: `Missing ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in local env.`,
-                });
+              const credentials = await getAiCredentials();
+              if (!credentials.ok) {
+                setDialog(
+                  describeAiUnavailable(credentials.reason, credentials.provider)
+                );
                 return;
               }
               setParseBusy(true);
               try {
                 const extracted = await importFromManualText(
                   text,
-                  provider,
-                  key,
+                  credentials.provider,
+                  credentials.apiKey,
                   'manual'
                 );
                 setRecipe((r) =>
@@ -457,6 +499,9 @@ export default function RecipeFormScreen() {
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Ingredients section"
+          accessibilityState={{ expanded: showIngredients }}
           onPress={() => setShowIngredients((v) => !v)}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
         >
@@ -467,7 +512,7 @@ export default function RecipeFormScreen() {
           />
           <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>Ingredients</Text>
         </Pressable>
-        <Pressable onPress={addIngredient}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={addIngredient}>
           <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Add</Text>
         </Pressable>
       </View>
@@ -485,6 +530,8 @@ export default function RecipeFormScreen() {
           }}
         >
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ingredient ${ing.name || 'untitled'}`}
             onPress={() => {
               setActiveIngredientId(ing.id);
               if (showUnitPickerForIngredientId && showUnitPickerForIngredientId !== ing.id) {
@@ -570,6 +617,7 @@ export default function RecipeFormScreen() {
                     ) : null}
                     {isSectionHeading ? (
                       <TextInput
+                        accessibilityLabel="Section heading"
                         value={ing.name}
                         onChangeText={(t) => {
                           const next = [...recipe.ingredients];
@@ -591,6 +639,7 @@ export default function RecipeFormScreen() {
                     ) : ing.amountMode === 'exact' ? (
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <TextInput
+                          accessibilityLabel="Ingredient quantity"
                           value={ingredientQuantityInputs[ing.id] ?? String(ing.quantity)}
                           onChangeText={(t) => {
                             setIngredientQuantityInputs((prev) => ({ ...prev, [ing.id]: t }));
@@ -638,6 +687,9 @@ export default function RecipeFormScreen() {
                           }}
                         />
                         <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Unit: ${ing.unit ?? 'none'}`}
+                          accessibilityHint="Opens the unit picker"
                           onPress={() =>
                             setShowUnitPickerForIngredientId((current) =>
                               current === ing.id ? null : ing.id
@@ -663,6 +715,7 @@ export default function RecipeFormScreen() {
                           </Text>
                         </Pressable>
                         <TextInput
+                          accessibilityLabel="Ingredient name"
                           value={ing.name}
                           onChangeText={(t) => {
                             const next = [...recipe.ingredients];
@@ -684,6 +737,7 @@ export default function RecipeFormScreen() {
                       </View>
                     ) : (
                       <TextInput
+                        accessibilityLabel="Ingredient name"
                         value={ing.name}
                         onChangeText={(t) => {
                           const next = [...recipe.ingredients];
@@ -710,6 +764,9 @@ export default function RecipeFormScreen() {
                           return (
                             <Pressable
                               key={option.label}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Use unit ${option.label}`}
+                              accessibilityState={{ selected: ing.unit === option.value }}
                               onPress={() => {
                                 const next = [...recipe.ingredients];
                                 next[idx] = { ...ing, unit: option.value };
@@ -758,6 +815,8 @@ export default function RecipeFormScreen() {
               })()}
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Done editing ingredient"
                   onPress={() => {
                     setActiveIngredientId(null);
                     setShowUnitPickerForIngredientId(null);
@@ -767,7 +826,11 @@ export default function RecipeFormScreen() {
                     Done
                   </Text>
                 </Pressable>
-                <Pressable onPress={() => removeIngredient(ing.id)}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ingredient ${ing.name || 'untitled'}`}
+                  onPress={() => removeIngredient(ing.id)}
+                >
                   <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
                     Remove
                   </Text>
@@ -786,6 +849,9 @@ export default function RecipeFormScreen() {
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Method section"
+          accessibilityState={{ expanded: showSteps }}
           onPress={() => setShowSteps((v) => !v)}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
         >
@@ -796,7 +862,7 @@ export default function RecipeFormScreen() {
           />
           <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>Steps</Text>
         </Pressable>
-        <Pressable onPress={addStep}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add step" onPress={addStep}>
           <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Add</Text>
         </Pressable>
       </View>
@@ -828,6 +894,9 @@ export default function RecipeFormScreen() {
             }}
           >
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Step ${(getIndex() ?? 0) + 1}, drag handle`}
+              accessibilityHint="Long press and drag to reorder this step"
               onLongPress={drag}
               delayLongPress={180}
               style={{ marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}
@@ -839,6 +908,7 @@ export default function RecipeFormScreen() {
             {activeStepId === item.id ? (
               <>
                 <TextInput
+                  accessibilityLabel="Step instruction"
                   multiline
                   value={item.instruction}
                   onChangeText={(text) => updateStepInstruction(item.id, text)}
@@ -858,12 +928,20 @@ export default function RecipeFormScreen() {
                   }}
                 />
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                  <Pressable onPress={() => setActiveStepId(null)}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Done editing step"
+                    onPress={() => setActiveStepId(null)}
+                  >
                     <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
                       Done
                     </Text>
                   </Pressable>
-                  <Pressable onPress={() => removeStep(item.id)}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove this step"
+                    onPress={() => removeStep(item.id)}
+                  >
                     <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
                       Remove
                     </Text>
@@ -872,6 +950,8 @@ export default function RecipeFormScreen() {
               </>
             ) : (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Edit step ${(getIndex() ?? 0) + 1}`}
                 onPress={() => setActiveStepId(item.id)}
                 style={{
                   minHeight: 52,
@@ -902,7 +982,14 @@ export default function RecipeFormScreen() {
       ) : null}
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe'}
+          accessibilityState={{ disabled: isSaving, busy: isSaving }}
+          disabled={isSaving}
           onPress={async () => {
+            // saveRecipe opens its own transaction, and SQLite has no nested
+            // transactions — a second tap mid-save fails the whole write.
+            if (isSaving) return;
             const nextErrors = validateRecipeDraft(recipe);
             setErrors(nextErrors);
             if (Object.keys(nextErrors).length > 0) {
@@ -912,8 +999,10 @@ export default function RecipeFormScreen() {
               });
               return;
             }
+            setIsSaving(true);
             try {
               await saveRecipe(recipe);
+              setBaseline(JSON.stringify(recipe));
               if (!recipeId && startedFromImport) {
                 router.replace({
                   pathname: '/recipe/[id]',
@@ -927,6 +1016,8 @@ export default function RecipeFormScreen() {
                 title: 'Save failed',
                 message: e instanceof Error ? e.message : 'Unknown error while saving recipe.',
               });
+            } finally {
+              setIsSaving(false);
             }
           }}
           style={{
@@ -934,11 +1025,28 @@ export default function RecipeFormScreen() {
             padding: 16,
             borderRadius: 14,
             alignItems: 'center',
+            opacity: isSaving ? 0.6 : 1,
           }}
         >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save</Text>
+          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
+            {isSaving ? 'Saving…' : 'Save'}
+          </Text>
         </Pressable>
       </ScrollView>
+      <ConfirmDialog
+        visible={showDiscardConfirm}
+        destructive
+        title="Discard changes?"
+        message="Your edits to this recipe have not been saved."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={() => {
+          setShowDiscardConfirm(false);
+          setBaseline(null);
+          leaveScreen();
+        }}
+        onCancel={() => setShowDiscardConfirm(false)}
+      />
       <AppDialog
         visible={dialog !== null}
         title={dialog?.title ?? ''}
@@ -978,6 +1086,7 @@ function LabeledInput({
     <View>
       <Text style={{ fontFamily: 'DMSans_500Medium', marginBottom: 6, color: colors.textPrimary }}>{label}</Text>
       <TextInput
+        accessibilityLabel={label}
         value={value}
         keyboardType={keyboard}
         onChangeText={onChange}

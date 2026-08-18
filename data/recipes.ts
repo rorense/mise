@@ -180,6 +180,85 @@ async function loadTagsForRecipe(
   return rows.map((r) => r.name);
 }
 
+/** SQLite's default host-parameter ceiling is 999; stay well inside it. */
+const SQL_PARAM_CHUNK = 500;
+
+/** Snapshots kept per recipe before the oldest are dropped. */
+const MAX_VERSIONS_PER_RECIPE = 20;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/**
+ * Batched counterpart to loadTagsForRecipe. The library list previously ran one
+ * tag query per card, so a 200-recipe library cost 201 round trips per render.
+ */
+async function loadTagsForRecipes(
+  db: SQLite.SQLiteDatabase,
+  recipeIds: string[]
+): Promise<Map<string, string[]>> {
+  const byRecipe = new Map<string, string[]>();
+  for (const ids of chunk(recipeIds, SQL_PARAM_CHUNK)) {
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ recipe_id: string; name: string }>(
+      `SELECT rt.recipe_id as recipe_id, t.name as name
+       FROM recipe_tags rt
+       JOIN tags t ON t.id = rt.tag_id
+       WHERE rt.recipe_id IN (${placeholders})
+       ORDER BY t.name COLLATE NOCASE`,
+      ids
+    );
+    for (const row of rows) {
+      const existing = byRecipe.get(row.recipe_id);
+      if (existing) existing.push(row.name);
+      else byRecipe.set(row.recipe_id, [row.name]);
+    }
+  }
+  return byRecipe;
+}
+
+/** Step text for many recipes at once, for the `mins<n` search filter. */
+async function loadStepInstructionsForRecipes(
+  db: SQLite.SQLiteDatabase,
+  recipeIds: string[]
+): Promise<Map<string, string[]>> {
+  const byRecipe = new Map<string, string[]>();
+  for (const ids of chunk(recipeIds, SQL_PARAM_CHUNK)) {
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ recipe_id: string; instruction: string }>(
+      `SELECT recipe_id, instruction
+       FROM steps
+       WHERE recipe_id IN (${placeholders})
+       ORDER BY order_idx, id`,
+      ids
+    );
+    for (const row of rows) {
+      const existing = byRecipe.get(row.recipe_id);
+      if (existing) existing.push(row.instruction);
+      else byRecipe.set(row.recipe_id, [row.instruction]);
+    }
+  }
+  return byRecipe;
+}
+
+/**
+ * Drops tags no recipe references any more. Without this the filter list keeps
+ * showing tags whose last recipe was deleted.
+ */
+async function deleteOrphanTags(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.runAsync(
+    `DELETE FROM tags
+     WHERE NOT EXISTS (
+       SELECT 1 FROM recipe_tags rt WHERE rt.tag_id = tags.id
+     )`
+  );
+}
+
 function toDraft(recipe: Recipe): Omit<Recipe, 'cookLogs'> {
   const { cookLogs: _cookLogs, ...draft } = recipe;
   return draft;
@@ -217,24 +296,58 @@ async function deleteUriIfUnreferenced(
   }
 }
 
-async function createRecipeVersionSnapshot(
-  db: SQLite.SQLiteDatabase,
+type PendingVersionSnapshot = {
+  id: string;
+  recipeId: string;
+  label: string;
+  snapshotJson: string;
+  createdAt: string;
+};
+
+/**
+ * Reads the current recipe so a snapshot can be written later. Deliberately
+ * separate from the write: reads go through the shared connection, and calling
+ * this from inside an exclusive transaction (which owns its own connection)
+ * would read across connections.
+ */
+async function buildRecipeVersionSnapshot(
   recipeId: string,
   label: string
-): Promise<void> {
+): Promise<PendingVersionSnapshot | null> {
   const currentRecipe = await getRecipeById(recipeId);
-  if (!currentRecipe) return;
-  const versionId = newId();
+  if (!currentRecipe) return null;
+  return {
+    id: newId(),
+    recipeId,
+    label,
+    snapshotJson: JSON.stringify(toDraft(currentRecipe)),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function writeRecipeVersionSnapshot(
+  db: SQLite.SQLiteDatabase,
+  snapshot: PendingVersionSnapshot
+): Promise<void> {
+  const { id: versionId, recipeId, label } = snapshot;
   await db.runAsync(
     `INSERT INTO recipe_versions (id, recipe_id, label, snapshot_json, created_at)
      VALUES (?, ?, ?, ?, ?)`,
-    [
-      versionId,
-      recipeId,
-      label,
-      JSON.stringify(toDraft(currentRecipe)),
-      new Date().toISOString(),
-    ]
+    [versionId, recipeId, label, snapshot.snapshotJson, snapshot.createdAt]
+  );
+  // Every save, archive, restore and applied adjustment writes a full snapshot.
+  // Unpruned, a frequently-tweaked recipe accumulates dozens of copies of
+  // itself, all of which also land in every backup.
+  await db.runAsync(
+    `DELETE FROM recipe_versions
+     WHERE recipe_id = ?
+       AND id NOT IN (
+         SELECT id FROM recipe_versions
+         WHERE recipe_id = ?
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT ?
+       )`,
+    [recipeId, recipeId, MAX_VERSIONS_PER_RECIPE]
   );
 }
 
@@ -474,10 +587,16 @@ export async function listRecipeCards(
   `;
   const params: (string | number)[] = [];
 
-  if (filter.type !== 'archived') {
-    sql += ` AND r.is_archived = 0`;
-  } else {
+  // An explicit is:archived token wins over the chip default. Applying both
+  // produced `is_archived = 0 AND is_archived = 1`, so the search operator
+  // could never match anything.
+  if (parsedSearch.flags.archived !== undefined) {
+    sql += ` AND r.is_archived = ?`;
+    params.push(parsedSearch.flags.archived ? 1 : 0);
+  } else if (filter.type === 'archived') {
     sql += ` AND r.is_archived = 1`;
+  } else {
+    sql += ` AND r.is_archived = 0`;
   }
 
   if (hasTextTerms) {
@@ -538,10 +657,6 @@ export async function listRecipeCards(
   if (parsedSearch.flags.wantToCook) {
     sql += ` AND r.want_to_cook = 1`;
   }
-  if (parsedSearch.flags.archived !== undefined) {
-    sql += ` AND r.is_archived = ?`;
-    params.push(parsedSearch.flags.archived ? 1 : 0);
-  }
   if (parsedSearch.flags.cooked === true) {
     sql += ` AND EXISTS (SELECT 1 FROM cook_logs c6 WHERE c6.recipe_id = r.id)`;
   } else if (parsedSearch.flags.cooked === false) {
@@ -584,14 +699,14 @@ export async function listRecipeCards(
 
   let filteredRows = rows;
   if (parsedSearch.minutes) {
+    const stepsByRecipe = await loadStepInstructionsForRecipes(
+      db,
+      rows.map((row) => row.id)
+    );
     const kept: typeof rows = [];
     for (const row of rows) {
-      const stepRows = await db.getAllAsync<{ instruction: string }>(
-        'SELECT instruction FROM steps WHERE recipe_id = ? ORDER BY order_idx, id',
-        [row.id]
-      );
-      const minutes = stepRows.reduce(
-        (acc, stepRow) => acc + estimateStepMinutes(stepRow.instruction),
+      const minutes = (stepsByRecipe.get(row.id) ?? []).reduce(
+        (acc, instruction) => acc + estimateStepMinutes(instruction),
         0
       );
       const value = parsedSearch.minutes.value;
@@ -610,25 +725,24 @@ export async function listRecipeCards(
     filteredRows = kept;
   }
 
-  const items: RecipeListItem[] = [];
-  for (const row of filteredRows) {
-    const tags = await loadTagsForRecipe(db, row.id);
-    items.push({
-      id: row.id,
-      title: row.title,
-      cuisine: row.cuisine ?? undefined,
-      heroUri: row.hero_uri ?? undefined,
-      mainImageUri: row.main_image_uri ?? undefined,
-      cookCount: row.cook_count,
-      isFavorite: row.is_favorite === 1,
-      wantToCook: row.want_to_cook === 1,
-      isArchived: row.is_archived === 1,
-      lastCookedAt: row.last_cooked_at ?? undefined,
-      updatedAt: row.updated_at,
-      tags,
-    });
-  }
-  return items;
+  const tagsByRecipe = await loadTagsForRecipes(
+    db,
+    filteredRows.map((row) => row.id)
+  );
+  return filteredRows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    cuisine: row.cuisine ?? undefined,
+    heroUri: row.hero_uri ?? undefined,
+    mainImageUri: row.main_image_uri ?? undefined,
+    cookCount: row.cook_count,
+    isFavorite: row.is_favorite === 1,
+    wantToCook: row.want_to_cook === 1,
+    isArchived: row.is_archived === 1,
+    lastCookedAt: row.last_cooked_at ?? undefined,
+    updatedAt: row.updated_at,
+    tags: tagsByRecipe.get(row.id) ?? [],
+  }));
 }
 
 export async function getAllTags(): Promise<string[]> {
@@ -686,12 +800,17 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
     'SELECT id FROM recipes WHERE id = ?',
     [recipe.id]
   );
-  await db.execAsync('BEGIN IMMEDIATE');
-  try {
-    if (existing) {
-      await createRecipeVersionSnapshot(db, recipe.id, 'Before edit');
+  // Read the pre-edit state before the transaction opens, so the snapshot does
+  // not read across connections from inside it.
+  const snapshot = existing
+    ? await buildRecipeVersionSnapshot(recipe.id, 'Before edit')
+    : null;
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    if (snapshot) {
+      await writeRecipeVersionSnapshot(txn, snapshot);
     }
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO recipes (id, title, source_url, source_type, main_image_uri, base_servings, is_favorite, want_to_cook, is_archived, cuisine, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
@@ -721,12 +840,12 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
       ]
     );
 
-    await db.runAsync('DELETE FROM ingredients WHERE recipe_id = ?', [recipe.id]);
-    await db.runAsync('DELETE FROM steps WHERE recipe_id = ?', [recipe.id]);
-    await db.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipe.id]);
+    await txn.runAsync('DELETE FROM ingredients WHERE recipe_id = ?', [recipe.id]);
+    await txn.runAsync('DELETE FROM steps WHERE recipe_id = ?', [recipe.id]);
+    await txn.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipe.id]);
 
     for (const ing of recipe.ingredients) {
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ingredients (id, recipe_id, quantity, unit, name, notes, scalable, amount_mode, is_section_heading, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -745,7 +864,7 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
     }
 
     for (const st of recipe.steps) {
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO steps (id, recipe_id, order_idx, instruction, scalable_quantities_json)
          VALUES (?, ?, ?, ?, ?)`,
         [
@@ -758,23 +877,24 @@ export async function saveRecipe(recipe: Omit<Recipe, 'cookLogs'>): Promise<void
       );
     }
 
-    const tagIds = await ensureTagIds(db, recipe.tags);
+    const tagIds = await ensureTagIds(txn, recipe.tags);
     for (const tid of tagIds) {
-      await db.runAsync(
+      await txn.runAsync(
         'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
         [recipe.id, tid]
       );
     }
+    await deleteOrphanTags(txn);
 
-    await db.execAsync('COMMIT');
-  } catch (e) {
-    await db.execAsync('ROLLBACK');
-    throw e;
-  }
+  });
 }
 
-export async function addCookLog(entry: CookLog): Promise<void> {
+export async function addCookLog(
+  entry: CookLog,
+  options?: { clearWantToCook?: boolean }
+): Promise<void> {
   const db = await getDatabase();
+  const clearWantToCook = options?.clearWantToCook ?? true;
   await db.runAsync(
     `INSERT INTO cook_logs (id, recipe_id, cooked_at, photo_uri, notes, rating, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -789,7 +909,9 @@ export async function addCookLog(entry: CookLog): Promise<void> {
     ]
   );
   await db.runAsync(
-    'UPDATE recipes SET updated_at = ?, want_to_cook = 0 WHERE id = ?',
+    clearWantToCook
+      ? 'UPDATE recipes SET updated_at = ?, want_to_cook = 0 WHERE id = ?'
+      : 'UPDATE recipes SET updated_at = ? WHERE id = ?',
     [new Date().toISOString(), entry.recipeId]
   );
 }
@@ -1010,7 +1132,8 @@ export async function deleteCookLog(id: string): Promise<void> {
     photo_uri: string | null;
   }>('SELECT recipe_id, photo_uri FROM cook_logs WHERE id = ?', [id]);
   await db.runAsync('DELETE FROM cook_logs WHERE id = ?', [id]);
-  await deleteUriIfUnreferenced(db, row?.photo_uri);
+  // The photo file is deliberately left on disk: deleting it here made undo
+  // restore a row pointing at nothing. Storage cleanup reclaims it later.
   if (row) {
     await db.runAsync(
       'UPDATE recipes SET updated_at = ? WHERE id = ?',
@@ -1029,7 +1152,9 @@ export async function deleteCookLogWithUndoData(
 }
 
 export async function restoreDeletedCookLog(log: CookLog): Promise<void> {
-  await addCookLog(log);
+  // Undo restores the log exactly as it was; it should not also re-clear the
+  // recipe's want-to-cook flag as a side effect.
+  await addCookLog(log, { clearWantToCook: false });
 }
 
 export async function deleteRecipe(id: string): Promise<void> {
@@ -1043,6 +1168,7 @@ export async function deleteRecipe(id: string): Promise<void> {
     [id]
   );
   await db.runAsync('DELETE FROM recipes WHERE id = ?', [id]);
+  await deleteOrphanTags(db);
   for (const row of photos) {
     await deleteUriIfUnreferenced(db, row.photo_uri);
   }
@@ -1084,40 +1210,40 @@ export async function setRecipeTags(recipeId: string, tags: string[]): Promise<v
     ).values()
   );
 
-  await db.execAsync('BEGIN IMMEDIATE');
-  try {
-    await db.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipeId]);
-    const tagIds = await ensureTagIds(db, unique);
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.runAsync('DELETE FROM recipe_tags WHERE recipe_id = ?', [recipeId]);
+    const tagIds = await ensureTagIds(txn, unique);
     for (const tagId of tagIds) {
-      await db.runAsync(
+      await txn.runAsync(
         'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
         [recipeId, tagId]
       );
     }
-    await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
+    await txn.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
       new Date().toISOString(),
       recipeId,
     ]);
-    await db.execAsync('COMMIT');
-  } catch (error) {
-    await db.execAsync('ROLLBACK');
-    throw error;
-  }
+    await deleteOrphanTags(txn);
+  });
 }
 
 export async function setRecipeArchived(recipeId: string, archived: boolean): Promise<void> {
   const db = await getDatabase();
-  await createRecipeVersionSnapshot(
-    db,
+  const snapshot = await buildRecipeVersionSnapshot(
     recipeId,
     archived ? 'Before archive' : 'Before unarchive'
   );
-  await db.runAsync(
-    `UPDATE recipes
-     SET is_archived = ?, updated_at = ?
-     WHERE id = ?`,
-    [archived ? 1 : 0, new Date().toISOString(), recipeId]
-  );
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    if (snapshot) {
+      await writeRecipeVersionSnapshot(txn, snapshot);
+    }
+    await txn.runAsync(
+      `UPDATE recipes
+       SET is_archived = ?, updated_at = ?
+       WHERE id = ?`,
+      [archived ? 1 : 0, new Date().toISOString(), recipeId]
+    );
+  });
 }
 
 export async function getRecipeServingsOverride(
@@ -1267,13 +1393,12 @@ export async function bulkEditRecipeTags(args: {
   const addTags = args.addTags.map((t) => t.trim()).filter(Boolean);
   const removeTags = new Set(args.removeTags.map((t) => t.trim().toLowerCase()).filter(Boolean));
 
-  await db.execAsync('BEGIN IMMEDIATE');
-  try {
-    const addTagIds = await ensureTagIds(db, addTags);
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const addTagIds = await ensureTagIds(txn, addTags);
     for (const recipeId of args.recipeIds) {
       if (addTagIds.length > 0) {
         for (const tagId of addTagIds) {
-          await db.runAsync(
+          await txn.runAsync(
             'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
             [recipeId, tagId]
           );
@@ -1289,23 +1414,20 @@ export async function bulkEditRecipeTags(args: {
         );
         for (const tag of existing) {
           if (removeTags.has(tag.name.toLowerCase())) {
-            await db.runAsync(
+            await txn.runAsync(
               'DELETE FROM recipe_tags WHERE recipe_id = ? AND tag_id = ?',
               [recipeId, tag.tag_id]
             );
           }
         }
       }
-      await db.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
+      await txn.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
         new Date().toISOString(),
         recipeId,
       ]);
     }
-    await db.execAsync('COMMIT');
-  } catch (error) {
-    await db.execAsync('ROLLBACK');
-    throw error;
-  }
+    await deleteOrphanTags(txn);
+  });
 }
 
 export async function createManualRecipeDraft(): Promise<Omit<Recipe, 'cookLogs'>> {

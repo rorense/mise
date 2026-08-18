@@ -57,6 +57,10 @@ export default function RecipeVersionsScreen() {
               {new Date(version.createdAt).toLocaleString()}
             </Text>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Restore version: ${version.label}`}
+              accessibilityHint="Replaces the current recipe with this saved version"
+              accessibilityState={{ disabled: busyVersionId !== null }}
               disabled={busyVersionId !== null}
               onPress={async () => {
                 setBusyVersionId(version.id);

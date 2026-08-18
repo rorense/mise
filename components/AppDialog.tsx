@@ -27,6 +27,8 @@ export function AppDialog({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss"
         onPress={onClose}
         style={{
           flex: 1,
@@ -36,6 +38,11 @@ export function AppDialog({
         }}
       >
         <Pressable
+          // accessible={false} keeps the title, message and each action button
+          // individually reachable; a Pressable defaults to grouping its
+          // children into one node, which would hide the buttons.
+          accessible={false}
+          accessibilityViewIsModal
           onPress={() => undefined}
           style={{
             backgroundColor: colors.surface,
@@ -66,9 +73,16 @@ export function AppDialog({
               return (
                 <Pressable
                   key={`${action.label}-${idx}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
                   onPress={async () => {
                     onClose();
-                    await action.onPress?.();
+                    try {
+                      await action.onPress?.();
+                    } catch {
+                      // A throwing action must not surface as an unhandled
+                      // rejection; the action itself owns its error reporting.
+                    }
                   }}
                   style={{
                     paddingHorizontal: 14,

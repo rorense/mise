@@ -31,16 +31,12 @@ import {
   normalizeServings,
   shouldCommitSliderTick,
 } from '@/domain/slider';
-import {
-  getAiProvider,
-  getRecipeSavedServings,
-  setRecipeSavedServings,
-} from '@/lib/secrets';
+import { getAiEnabled } from '@/lib/secrets';
 import {
   compressAndSaveCookPhoto,
   compressAndSaveMainRecipePhoto,
 } from '@/lib/media';
-import { getBundledAiKey } from '@/lib/aiConfig';
+import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
 import { newId } from '@/lib/id';
 import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers';
@@ -115,7 +111,7 @@ export default function RecipeDetailScreen() {
     endsAtMs: number | null;
   } | null>(null);
   const hasRequestedNotificationPermissionRef = useRef(false);
-  const AI_ENABLED = false;
+  const [aiEnabled, setAiEnabled] = useState(false);
   const shouldBackToHome = fromImport === '1' || fromImport === 'true';
 
   const reload = useCallback(async () => {
@@ -126,18 +122,15 @@ export default function RecipeDetailScreen() {
     if (seq !== loadSeqRef.current) return;
     if (r) {
       const maxServings = Math.max(12, Math.round(r.baseServings));
-      const [savedSecure, savedDb, pending] = await Promise.all([
-        getRecipeSavedServings(r.id),
+      const [savedServings, pending] = await Promise.all([
         getRecipeServingsOverride(r.id),
         listPendingRecipeAdjustments(r.id),
       ]);
       if (seq !== loadSeqRef.current) return;
-      const nextServings =
-        typeof savedSecure === 'number'
-          ? normalizeServings(savedSecure, maxServings)
-          : typeof savedDb === 'number'
-            ? normalizeServings(savedDb, maxServings)
-          : normalizeServings(r.baseServings, maxServings);
+      const nextServings = normalizeServings(
+        typeof savedServings === 'number' ? savedServings : r.baseServings,
+        maxServings
+      );
       setServings(nextServings);
       setPendingAdjustments(pending);
       setRecipe(r);
@@ -156,33 +149,55 @@ export default function RecipeDetailScreen() {
     }, [reload])
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void (async () => {
+        const enabled = await getAiEnabled();
+        if (!cancelled) setAiEnabled(enabled);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
+
+  // The updater stays pure: React may call it more than once, and firing the
+  // notification from inside it produced duplicate alerts. Depending on
+  // endsAtMs rather than the whole timer object also stops the interval being
+  // torn down and rebuilt on every displayed second.
+  const timerEndsAtMs = activeTimer?.isPaused ? null : activeTimer?.endsAtMs ?? null;
+  const timerLabel = activeTimer?.label ?? '';
+
   useEffect(() => {
-    if (!activeTimer || activeTimer.isPaused || !activeTimer.endsAtMs) return;
+    if (timerEndsAtMs === null) return;
     const handle = setInterval(() => {
-      setActiveTimer((current) => {
-        if (!current || current.isPaused || !current.endsAtMs) return current;
-        const remainingSeconds = Math.max(
-          0,
-          Math.ceil((current.endsAtMs - Date.now()) / 1000)
-        );
-        if (remainingSeconds <= 0) {
-          void presentTimerDoneNotification(current.label);
-          setDialog({
-            title: 'Timer done',
-            message: `${current.label} finished.`,
-            actions: [{ label: 'OK', variant: 'primary' }],
-          });
-          return null;
-        }
-        if (remainingSeconds === current.remainingSeconds) return current;
-        return {
-          ...current,
-          remainingSeconds,
-        };
-      });
+      const remainingSeconds = Math.max(
+        0,
+        Math.ceil((timerEndsAtMs - Date.now()) / 1000)
+      );
+      if (remainingSeconds <= 0) {
+        // Stop first: the notification and dialog must fire once, and firing
+        // them from inside the state updater made React's double-invoke
+        // produce duplicates.
+        clearInterval(handle);
+        setActiveTimer(null);
+        void presentTimerDoneNotification(timerLabel);
+        setDialog({
+          title: 'Timer done',
+          message: `${timerLabel} finished.`,
+          actions: [{ label: 'OK', variant: 'primary' }],
+        });
+        return;
+      }
+      setActiveTimer((current) =>
+        current && current.remainingSeconds !== remainingSeconds
+          ? { ...current, remainingSeconds }
+          : current
+      );
     }, 250);
     return () => clearInterval(handle);
-  }, [activeTimer, setDialog]);
+  }, [timerEndsAtMs, timerLabel]);
 
   const startStepTimer = useCallback(async (stepId: string, label: string, seconds: number) => {
     if (!hasRequestedNotificationPermissionRef.current) {
@@ -216,6 +231,8 @@ export default function RecipeDetailScreen() {
           This recipe may have been removed.
         </Text>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to library"
           onPress={() => router.replace('/')}
           style={{
             backgroundColor: colors.primary,
@@ -258,7 +275,7 @@ export default function RecipeDetailScreen() {
       '',
       ...ingredientLines,
       '',
-      ...recipe.steps
+      ...[...recipe.steps]
         .sort((a, b) => a.order - b.order)
         .map(
           (s, idx) =>
@@ -287,18 +304,17 @@ export default function RecipeDetailScreen() {
         createdAt: new Date().toISOString(),
       });
       let adjustmentId: string | undefined;
-      if (noteText) {
+      if (noteText && aiEnabled) {
         const net = await NetInfo.fetch();
         if (net.isConnected) {
-          const provider = await getAiProvider();
-          const key = getBundledAiKey(provider);
-          if (key) {
+          const credentials = await getAiCredentials();
+          if (credentials.ok) {
             try {
               const suggestions = await suggestRecipeAdjustmentsFromCookNote({
                 recipe,
                 note: noteText,
-                provider,
-                apiKey: key,
+                provider: credentials.provider,
+                apiKey: credentials.apiKey,
               });
               const adjustment = await createRecipeAdjustment({
                 recipeId: recipe.id,
@@ -367,7 +383,7 @@ export default function RecipeDetailScreen() {
       return;
     }
     const pick = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 1,
     });
     if (pick.canceled || !pick.assets?.[0]) return;
@@ -388,7 +404,7 @@ export default function RecipeDetailScreen() {
       return;
     }
     const snap = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 1,
     });
     if (snap.canceled || !snap.assets?.[0]) return;
@@ -422,7 +438,7 @@ export default function RecipeDetailScreen() {
       return;
     }
     const pick = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 1,
     });
     if (pick.canceled || !pick.assets?.[0]) return;
@@ -442,7 +458,7 @@ export default function RecipeDetailScreen() {
       return;
     }
     const snap = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 1,
     });
     if (snap.canceled || !snap.assets?.[0]) return;
@@ -522,7 +538,9 @@ export default function RecipeDetailScreen() {
     try {
       await setRecipeFlags(recipe.id, { isFavorite: nextValue });
     } catch {
-      setRecipe({ ...recipe, isFavorite: !nextValue });
+      setRecipe((current) =>
+        current ? { ...current, isFavorite: !nextValue } : current
+      );
       setDialog({
         title: 'Could not update',
         message: 'Please try again.',
@@ -537,7 +555,9 @@ export default function RecipeDetailScreen() {
     try {
       await setRecipeFlags(recipe.id, { wantToCook: nextValue });
     } catch {
-      setRecipe({ ...recipe, wantToCook: !nextValue });
+      setRecipe((current) =>
+        current ? { ...current, wantToCook: !nextValue } : current
+      );
       setDialog({
         title: 'Could not update',
         message: 'Please try again.',
@@ -604,7 +624,13 @@ export default function RecipeDetailScreen() {
       >
         <View style={{ height: 260, backgroundColor: colors.border }}>
           {hero ? (
-            <Pressable onPress={() => setFullscreenImageUri(hero)} style={{ width: '100%', height: '100%' }}>
+            <Pressable
+              accessibilityRole="imagebutton"
+              accessibilityLabel={`Photo of ${recipe.title}`}
+              accessibilityHint="Opens the photo full screen"
+              onPress={() => setFullscreenImageUri(hero)}
+              style={{ width: '100%', height: '100%' }}
+            >
               <Image source={{ uri: hero }} style={{ width: '100%', height: '100%' }} />
             </Pressable>
           ) : (
@@ -613,6 +639,8 @@ export default function RecipeDetailScreen() {
             </View>
           )}
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change main photo"
             onPress={() =>
               setDialog({
                 title: 'Main image',
@@ -659,6 +687,10 @@ export default function RecipeDetailScreen() {
               {recipe.title}
             </Text>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reading mode"
+              accessibilityHint="Hides everything except ingredients and method"
+              accessibilityState={{ selected: readMode }}
               onPress={() => setReadMode((v) => !v)}
               style={{
                 width: 34,
@@ -678,6 +710,9 @@ export default function RecipeDetailScreen() {
               />
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Recipe actions"
+              accessibilityHint="Edit, share, version history, archive"
               onPress={openQuickActions}
               style={{
                 width: 34,
@@ -695,6 +730,8 @@ export default function RecipeDetailScreen() {
           </View>
           {!readMode && recipe.sourceUrl ? (
             <Text
+              accessibilityRole="link"
+              accessibilityLabel="Open original recipe source in browser"
               onPress={() => Linking.openURL(recipe.sourceUrl)}
               style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}
             >
@@ -713,6 +750,10 @@ export default function RecipeDetailScreen() {
                 {recipe.tags.map((tag) => (
                   <Pressable
                     key={tag}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Tag ${tag}`}
+                    accessibilityHint="Removes this tag"
+                    accessibilityState={{ disabled: isUpdatingTags }}
                     disabled={isUpdatingTags}
                     onPress={() => removeTag(tag)}
                     style={{
@@ -743,6 +784,7 @@ export default function RecipeDetailScreen() {
                 }}
               >
                 <TextInput
+                  accessibilityLabel="Add tags, comma separated"
                   value={tagDraft}
                   onChangeText={setTagDraft}
                   onSubmitEditing={() => {
@@ -764,6 +806,9 @@ export default function RecipeDetailScreen() {
                   }}
                 />
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add tags"
+                  accessibilityState={{ disabled: isUpdatingTags }}
                   onPress={() => {
                     void addTagsFromDraft();
                   }}
@@ -786,6 +831,9 @@ export default function RecipeDetailScreen() {
           {!readMode ? (
             <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Favourite"
+              accessibilityState={{ selected: recipe.isFavorite }}
               onPress={toggleFavorite}
               style={{
                 flexDirection: 'row',
@@ -814,6 +862,9 @@ export default function RecipeDetailScreen() {
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Want to cook"
+              accessibilityState={{ selected: recipe.wantToCook }}
               onPress={toggleWantToCook}
               style={{
                 flexDirection: 'row',
@@ -845,6 +896,10 @@ export default function RecipeDetailScreen() {
           ) : null}
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Checklist mode"
+              accessibilityHint="Lets you tick off ingredients as you go"
+              accessibilityState={{ selected: checklistMode }}
               onPress={() => setChecklistMode((v) => !v)}
               style={{
                 flexDirection: 'row',
@@ -874,6 +929,8 @@ export default function RecipeDetailScreen() {
             </Pressable>
             {checklistMode ? (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear ticked ingredients"
                 onPress={() => setCheckedIngredientIds([])}
                 style={{
                   paddingHorizontal: 12,
@@ -930,7 +987,6 @@ export default function RecipeDetailScreen() {
                 lastSliderCommitAtRef.current = Date.now();
                 const nextServings = normalizeServings(value, sliderMax);
                 setServings(nextServings);
-                setRecipeSavedServings(recipe.id, nextServings);
                 void setRecipeServingsOverride(recipe.id, nextServings);
               }}
               minimumTrackTintColor={colors.primary}
@@ -939,6 +995,9 @@ export default function RecipeDetailScreen() {
             />
           </View>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ingredients section"
+            accessibilityState={{ expanded: showIngredients }}
             onPress={() => setShowIngredients((v) => !v)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}
           >
@@ -975,6 +1034,10 @@ export default function RecipeDetailScreen() {
                     return (
                       <Pressable
                         key={ing.id}
+                        accessibilityRole={checklistMode ? 'checkbox' : 'text'}
+                        accessibilityLabel={`${amount} ${ing.name}`}
+                        accessibilityState={checklistMode ? { checked } : undefined}
+                        accessibilityHint={checklistMode ? 'Ticks this ingredient off' : undefined}
                         onPress={() => {
                           if (checklistMode) {
                             toggleIngredientChecked(ing.id);
@@ -1009,6 +1072,9 @@ export default function RecipeDetailScreen() {
               ))
             : null}
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Method section"
+            accessibilityState={{ expanded: showMethod }}
             onPress={() => setShowMethod((v) => !v)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
           >
@@ -1022,7 +1088,7 @@ export default function RecipeDetailScreen() {
             </Text>
           </Pressable>
           {(readMode || showMethod)
-            ? recipe.steps
+            ? [...recipe.steps]
             .sort((a, b) => a.order - b.order)
             .map((s, idx) => (
               <View key={s.id} style={{ marginBottom: 10 }}>
@@ -1055,6 +1121,8 @@ export default function RecipeDetailScreen() {
                   {extractStepTimerPresets(s.instruction).map((preset) => (
                     <Pressable
                       key={preset.key}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Start ${preset.label} timer for step ${idx + 1}`}
                       onPress={() => void startStepTimer(s.id, `Step ${idx + 1} · ${preset.label}`, preset.seconds)}
                       style={{
                         borderWidth: 1,
@@ -1077,6 +1145,9 @@ export default function RecipeDetailScreen() {
           {!readMode ? (
             <>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cook journal section"
+                accessibilityState={{ expanded: showCookJournal }}
                 onPress={() => setShowCookJournal((v) => !v)}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
               >
@@ -1093,7 +1164,15 @@ export default function RecipeDetailScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
                   {recipe.cookLogs.map((log) => (
                     <View key={log.id} style={{ width: 120 }}>
-                      <Pressable onPress={() => (log.photoUri ? setFullscreenImageUri(log.photoUri) : router.push(`/cook-log/${log.id}`))}>
+                      <Pressable
+                        accessibilityRole={log.photoUri ? 'imagebutton' : 'button'}
+                        accessibilityLabel={
+                          log.photoUri
+                            ? `Cook photo from ${new Date(log.cookedAt).toLocaleDateString()}`
+                            : `Cook log from ${new Date(log.cookedAt).toLocaleDateString()}`
+                        }
+                        onPress={() => (log.photoUri ? setFullscreenImageUri(log.photoUri) : router.push(`/cook-log/${log.id}`))}
+                      >
                         {log.photoUri ? (
                           <Image source={{ uri: log.photoUri }} style={{ width: 120, height: 120, borderRadius: 14 }} />
                         ) : (
@@ -1107,7 +1186,11 @@ export default function RecipeDetailScreen() {
                           />
                         )}
                       </Pressable>
-                      <Pressable onPress={() => router.push(`/cook-log/${log.id}`)}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open cook log from ${new Date(log.cookedAt).toLocaleDateString()}`}
+                        onPress={() => router.push(`/cook-log/${log.id}`)}
+                      >
                         <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
                           {new Date(log.cookedAt).toLocaleDateString()}
                           {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
@@ -1129,6 +1212,8 @@ export default function RecipeDetailScreen() {
                       </Pressable>
                       {log.photoUri ? (
                         <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Set this photo as the recipe hero image"
                           onPress={async () => {
                             await setRecipeMainImageFromCookLog(recipe.id, log.id);
                             await reload();
@@ -1155,6 +1240,9 @@ export default function RecipeDetailScreen() {
                 {[1, 2, 3, 4, 5].map((value) => (
                   <Pressable
                     key={value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Rate ${value} out of 5`}
+                    accessibilityState={{ selected: ratingDraft !== null && value <= ratingDraft }}
                     onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
                   >
                     <Ionicons
@@ -1167,6 +1255,8 @@ export default function RecipeDetailScreen() {
               </View>
               {pendingAdjustments.length > 0 ? (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Review ${pendingAdjustments.length} pending recipe updates`}
                   onPress={() =>
                     router.push(`/recipe/adjustments/${pendingAdjustments[0].id}`)
                   }
@@ -1184,6 +1274,7 @@ export default function RecipeDetailScreen() {
                 </Pressable>
               ) : null}
               <TextInput
+                accessibilityLabel="Notes for this cook"
                 placeholder="Notes for this cook (optional)"
                 placeholderTextColor={colors.textSecondary}
                 value={noteDraft}
@@ -1202,6 +1293,9 @@ export default function RecipeDetailScreen() {
                 }}
               />
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isLoggingCook ? 'Saving cook log' : 'Log this cook'}
+                accessibilityState={{ disabled: isLoggingCook, busy: isLoggingCook }}
                 disabled={isLoggingCook}
                 onPress={logCook}
                 style={{
@@ -1222,9 +1316,11 @@ export default function RecipeDetailScreen() {
           ) : null}
         </View>
       </ScrollView>
-      {AI_ENABLED ? (
+      {aiEnabled ? (
         <>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cooking assistant"
             onPress={async () => {
               const net = await NetInfo.fetch();
               if (!net.isConnected) {
@@ -1235,17 +1331,25 @@ export default function RecipeDetailScreen() {
                 });
                 return;
               }
-              const provider = await getAiProvider();
-              const key = getBundledAiKey(provider);
-              if (!key) {
+              const credentials = await getAiCredentials();
+              if (!credentials.ok) {
+                const { title, message } = describeAiUnavailable(
+                  credentials.reason,
+                  credentials.provider
+                );
                 setDialog({
-                  title: 'API key',
-                  message: 'Missing API key in local env.',
+                  title,
+                  message,
                   actions: [{ label: 'OK', variant: 'primary' }],
                 });
                 return;
               }
-              sheetRef.current?.present(recipe, servings, provider, key);
+              sheetRef.current?.present(
+                recipe,
+                servings,
+                credentials.provider,
+                credentials.apiKey
+              );
             }}
             style={{
               position: 'absolute',
@@ -1294,6 +1398,8 @@ export default function RecipeDetailScreen() {
             </Text>
           </View>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={activeTimer.isPaused ? 'Resume timer' : 'Pause timer'}
             onPress={() =>
               setActiveTimer((current) => {
                 if (!current) return current;
@@ -1320,7 +1426,11 @@ export default function RecipeDetailScreen() {
               {activeTimer.isPaused ? 'Resume' : 'Pause'}
             </Text>
           </Pressable>
-          <Pressable onPress={() => setActiveTimer(null)}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Stop timer"
+            onPress={() => setActiveTimer(null)}
+          >
             <Text style={{ color: colors.destructive, fontFamily: 'DMSans_700Bold' }}>Stop</Text>
           </Pressable>
         </View>

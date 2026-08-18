@@ -1,17 +1,13 @@
+import { fetchWithTimeout, WEB_TIMEOUT_MS } from '@/lib/http';
 import { excerptHtml, extractJsonLdRecipeHint } from '@/lib/import/jsonLd';
 import { extractRecipeFromText } from '@/lib/import/extract';
-import {
-  extractYoutubeVideoId,
-  fetchYoutubeDescription,
-} from '@/lib/import/youtube';
 import type { AiProvider } from '@/lib/secrets';
 import type { Recipe, SourceType } from '@/types/recipe';
 
 export async function importFromUrl(
   url: string,
   provider: AiProvider,
-  apiKey: string,
-  youtubeApiKey: string | null
+  apiKey: string
 ): Promise<Omit<Recipe, 'cookLogs'>> {
   const normalized = url.trim();
   let parsedUrl: URL;
@@ -24,26 +20,7 @@ export async function importFromUrl(
     throw new Error('Only http(s) URLs are supported.');
   }
 
-  const yt = extractYoutubeVideoId(normalized);
-  if (yt) {
-    if (!youtubeApiKey) {
-      throw new Error(
-        'Add a YouTube Data API key in Settings to import videos.'
-      );
-    }
-    const { title, description } = await fetchYoutubeDescription(
-      yt,
-      youtubeApiKey
-    );
-    const content = `${title}\n\n${description}`;
-    return extractRecipeFromText(provider, apiKey, {
-      sourceType: 'youtube',
-      sourceUrl: normalized,
-      content,
-    });
-  }
-
-  const res = await fetch(normalized);
+  const res = await fetchWithTimeout(normalized, {}, WEB_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`Could not download page (${res.status})`);
   }

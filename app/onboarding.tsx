@@ -54,7 +54,7 @@ export default function OnboardingScreen() {
             Quick start
           </Text>
           <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            1. Add a recipe manually or import one from URL/Instagram/YouTube.
+            1. Add a recipe manually or import one from a web page.
           </Text>
           <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
             2. Adjust servings and cook from the recipe detail page.
@@ -65,6 +65,8 @@ export default function OnboardingScreen() {
         </View>
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Start using Mise en"
           onPress={finish}
           style={{
             marginTop: 8,

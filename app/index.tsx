@@ -12,7 +12,7 @@ import { drainOfflineAiQueue } from '@/lib/ai/offlineQueue';
 import type { ThemeColors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -28,11 +28,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const options = { headerShown: false };
 
+const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * Builds the single spoken description for a recipe card. Without this a screen
+ * reader would announce the card's fragments ("chicken", "2 cooks") with no
+ * indication of what they belong to.
+ */
+function describeRecipeCard(item: RecipeListItem): string {
+  const parts = [item.title || 'Untitled'];
+  if (item.cuisine) parts.push(item.cuisine);
+  parts.push(item.cookCount === 1 ? 'cooked once' : `cooked ${item.cookCount} times`);
+  if (item.isFavorite) parts.push('favourite');
+  if (item.wantToCook) parts.push('want to cook');
+  return parts.join(', ');
+}
+
 export default function LibraryScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [sort, setSort] = useState<LibrarySort>('recent_added');
   const [filter, setFilter] = useState<LibraryFilter>({ type: 'none' });
   const [grid, setGrid] = useState(true);
@@ -60,148 +77,53 @@ export default function LibraryScreen() {
     };
   }, [router]);
 
+  // Typing updates `query` immediately so the field stays responsive, but the
+  // database work is driven by `debouncedQuery` so a burst of keystrokes costs
+  // one query pass instead of one per character.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [query]);
+
   const reload = useCallback(async () => {
     const seq = ++reloadSeqRef.current;
     const [t, c, rows] = await Promise.all([
       getAllTags(),
       getAllCuisines(),
-      listRecipeCards(query, filter, sort),
+      listRecipeCards(debouncedQuery, filter, sort),
     ]);
     if (seq !== reloadSeqRef.current) return;
     setTags(t);
     setCuisines(c);
     setItems(rows);
-  }, [query, filter, sort]);
+  }, [debouncedQuery, filter, sort]);
 
   useFocusEffect(
     useCallback(() => {
-      void (async () => {
-        await drainOfflineAiQueue();
-        await reload();
-      })();
+      void reload();
     }, [reload])
   );
 
-  const renderCard = ({ item }: { item: RecipeListItem }) => (
-    <Pressable
-      onPress={() => router.push(`/recipe/${item.id}`)}
-      style={({ pressed }) => ({
-        flex: grid ? 0.5 : 1,
-        marginBottom: 14,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
-      })}
-    >
-      <View
-        style={{
-          borderRadius: 18,
-          overflow: 'hidden',
-          backgroundColor: colors.surface,
-          borderWidth: 1,
-          borderColor: colors.border,
-          shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 12,
-          elevation: 2,
-        }}
-      >
-        <View style={{ height: grid ? 170 : 210, backgroundColor: colors.border }}>
-          {item.heroUri ? (
-            <Image
-              source={{ uri: item.heroUri }}
-              style={{ width: '100%', height: '100%' }}
-            />
-          ) : (
-            <View
-              style={{
-                flex: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
-            </View>
-          )}
-
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              paddingHorizontal: 12,
-              paddingTop: 28,
-              paddingBottom: 10,
-              backgroundColor: '#00000066',
-            }}
-          >
-            <Text
-              style={{
-                fontFamily: 'Lora_700Bold',
-                fontSize: 16,
-                color: '#fff',
-              }}
-              numberOfLines={2}
-            >
-              {item.title || 'Untitled'}
-            </Text>
-          </View>
-          {(item.isFavorite || item.wantToCook) && (
-            <View
-              style={{
-                position: 'absolute',
-                right: 8,
-                top: 8,
-                flexDirection: 'row',
-                gap: 6,
-              }}
-            >
-              {item.isFavorite ? (
-                <View
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 12,
-                    backgroundColor: '#00000066',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="star" size={13} color="#FFD166" />
-                </View>
-              ) : null}
-              {item.wantToCook ? (
-                <View
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 12,
-                    backgroundColor: '#00000066',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Ionicons name="flame" size={13} color="#FF9F1C" />
-                </View>
-              ) : null}
-            </View>
-          )}
-        </View>
-
-        <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
-          <Text
-            style={{
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textSecondary,
-            }}
-            numberOfLines={1}
-          >
-            {item.cuisine ? `${item.cuisine} · ` : ''}
-            {item.cookCount} cooks
-          </Text>
-        </View>
-      </View>
-    </Pressable>
+  // Deliberately separate from `reload`, with no search dependencies: draining
+  // the queue can send AI requests, and that must never be triggered by typing.
+  useFocusEffect(
+    useCallback(() => {
+      void drainOfflineAiQueue();
+    }, [])
   );
+
+  const openRecipe = useCallback(
+    (recipeId: string) => router.push(`/recipe/${recipeId}`),
+    [router]
+  );
+
+  const renderCard = useCallback(
+    ({ item }: { item: RecipeListItem }) => (
+      <RecipeCard item={item} grid={grid} colors={colors} onPress={openRecipe} />
+    ),
+    [grid, colors, openRecipe]
+  );
+
 
   const hasActiveSearchOrFilter =
     query.trim().length > 0 || filter.type !== 'none';
@@ -236,6 +158,9 @@ export default function LibraryScreen() {
             Mise en
           </Text>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sort recipes"
+            accessibilityHint="Opens sort options"
             onPress={() => setSortMenu(true)}
             hitSlop={8}
             style={{
@@ -253,6 +178,8 @@ export default function LibraryScreen() {
             <Ionicons name="swap-vertical-outline" size={20} color={colors.textPrimary} />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={grid ? 'Switch to list view' : 'Switch to grid view'}
             onPress={() => setGrid((g) => !g)}
             hitSlop={8}
             style={{
@@ -271,6 +198,8 @@ export default function LibraryScreen() {
           </Pressable>
           <Link href="/settings" asChild>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
               hitSlop={8}
               style={{
                 width: 34,
@@ -300,11 +229,14 @@ export default function LibraryScreen() {
         >
           <Ionicons name="search" size={19} color={colors.textSecondary} />
           <TextInput
+            accessibilityLabel="Search recipes"
+            accessibilityHint="Supports filters such as has:chicken, no:nuts, is:favorite and mins<30"
             placeholder='Search (e.g. has:chicken no:nuts is:favorite mins<30)'
             placeholderTextColor={colors.textSecondary}
             value={query}
             onChangeText={setQuery}
-            onSubmitEditing={reload}
+            onSubmitEditing={() => setDebouncedQuery(query)}
+            returnKeyType="search"
             style={{
               flex: 1,
               paddingVertical: 11,
@@ -386,6 +318,8 @@ export default function LibraryScreen() {
         />
         <Chip
           label="More"
+          accessibilityLabel="More filters"
+          accessibilityHint="Opens tag and cuisine filters"
           active={filter.type === 'tag' || filter.type === 'cuisine'}
           colors={colors}
           onPress={() => setFilterMenu(true)}
@@ -419,8 +353,11 @@ export default function LibraryScreen() {
             </Text>
             {hasActiveSearchOrFilter ? (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear search and filters"
                 onPress={() => {
                   setQuery('');
+                  setDebouncedQuery('');
                   setFilter({ type: 'none' });
                 }}
                 style={{
@@ -439,6 +376,8 @@ export default function LibraryScreen() {
               </Pressable>
             ) : (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add your first recipe"
                 onPress={() => router.push('/import')}
                 style={{
                   marginTop: 8,
@@ -459,6 +398,8 @@ export default function LibraryScreen() {
       />
 
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Add recipe"
         onPress={() => router.push('/import')}
         style={{
           position: 'absolute',
@@ -479,8 +420,15 @@ export default function LibraryScreen() {
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
 
-      <Modal visible={sortMenu} transparent animationType="fade">
+      <Modal
+        visible={sortMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSortMenu(false)}
+      >
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close sort menu"
           style={{
             flex: 1,
             backgroundColor: '#0006',
@@ -500,6 +448,9 @@ export default function LibraryScreen() {
             ).map(([value, label]) => (
               <Pressable
                 key={value}
+                accessibilityRole="menuitem"
+                accessibilityLabel={`Sort by ${label}`}
+                accessibilityState={{ selected: sort === value }}
                 onPress={() => {
                   setSort(value);
                   setSortMenu(false);
@@ -514,8 +465,15 @@ export default function LibraryScreen() {
           </View>
         </Pressable>
       </Modal>
-      <Modal visible={filterMenu} transparent animationType="fade">
+      <Modal
+        visible={filterMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFilterMenu(false)}
+      >
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close filters"
           style={{
             flex: 1,
             backgroundColor: '#0006',
@@ -525,6 +483,9 @@ export default function LibraryScreen() {
           onPress={() => setFilterMenu(false)}
         >
           <Pressable
+            // See AppDialog: grouping would hide the filter chips inside.
+            accessible={false}
+            accessibilityViewIsModal
             onPress={() => undefined}
             style={{
               backgroundColor: colors.surface,
@@ -588,6 +549,7 @@ export default function LibraryScreen() {
                 <Chip
                   key={t}
                   label={`# ${t}`}
+                  accessibilityLabel={`Tag ${t}`}
                   active={filter.type === 'tag' && filter.tag === t}
                   colors={colors}
                   onPress={() =>
@@ -616,6 +578,8 @@ export default function LibraryScreen() {
               ))}
             </ScrollView>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Done, close filters"
               onPress={() => setFilterMenu(false)}
               style={{
                 alignSelf: 'flex-end',
@@ -632,19 +596,170 @@ export default function LibraryScreen() {
   );
 }
 
+
+/**
+ * Memoised so a keystroke in the search field re-renders the list shell
+ * without re-rendering every visible card.
+ */
+const RecipeCard = memo(function RecipeCard({
+  item,
+  grid,
+  colors,
+  onPress,
+}: {
+  item: RecipeListItem;
+  grid: boolean;
+  colors: ThemeColors;
+  onPress: (id: string) => void;
+}) {
+  return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={describeRecipeCard(item)}
+        accessibilityHint="Opens the recipe"
+        onPress={() => onPress(item.id)}
+        style={({ pressed }) => ({
+          flex: grid ? 0.5 : 1,
+          marginBottom: 14,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        })}
+      >
+        <View
+          style={{
+            borderRadius: 18,
+            overflow: 'hidden',
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            shadowColor: '#000',
+            shadowOpacity: 0.08,
+            shadowRadius: 12,
+            elevation: 2,
+          }}
+        >
+          <View style={{ height: grid ? 170 : 210, backgroundColor: colors.border }}>
+            {item.heroUri ? (
+              <Image
+                source={{ uri: item.heroUri }}
+                style={{ width: '100%', height: '100%' }}
+              />
+            ) : (
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
+              </View>
+            )}
+
+            <View
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                paddingHorizontal: 12,
+                paddingTop: 28,
+                paddingBottom: 10,
+                backgroundColor: '#00000066',
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Lora_700Bold',
+                  fontSize: 16,
+                  color: '#fff',
+                }}
+                numberOfLines={2}
+              >
+                {item.title || 'Untitled'}
+              </Text>
+            </View>
+            {(item.isFavorite || item.wantToCook) && (
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  top: 8,
+                  flexDirection: 'row',
+                  gap: 6,
+                }}
+              >
+                {item.isFavorite ? (
+                  <View
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 12,
+                      backgroundColor: '#00000066',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="star" size={13} color="#FFD166" />
+                  </View>
+                ) : null}
+                {item.wantToCook ? (
+                  <View
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 12,
+                      backgroundColor: '#00000066',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="flame" size={13} color="#FF9F1C" />
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </View>
+
+          <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
+            <Text
+              style={{
+                fontFamily: 'DMSans_400Regular',
+                color: colors.textSecondary,
+              }}
+              numberOfLines={1}
+            >
+              {item.cuisine ? `${item.cuisine} · ` : ''}
+              {item.cookCount} cooks
+            </Text>
+          </View>
+        </View>
+      </Pressable>
+  );
+});
+
 function Chip({
   label,
   active,
   onPress,
   colors,
+  accessibilityLabel,
+  accessibilityHint,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
   colors: ThemeColors;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ selected: active }}
+      accessibilityHint={
+        accessibilityHint ?? (active ? 'Removes this filter' : 'Applies this filter')
+      }
       onPress={onPress}
       style={{
         paddingHorizontal: 14,

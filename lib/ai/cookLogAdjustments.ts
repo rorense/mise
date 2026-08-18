@@ -179,7 +179,7 @@ function buildUserPrompt(recipe: Recipe, note: string): string {
     )
     .join('\n');
 
-  const steps = recipe.steps
+  const steps = [...recipe.steps]
     .sort((a, b) => a.order - b.order)
     .map((step, idx) => `${idx + 1}. ${step.id} | ${step.instruction}`)
     .join('\n');

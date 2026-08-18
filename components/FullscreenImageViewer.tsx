@@ -26,6 +26,8 @@ export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageView
       <View style={{ flex: 1, backgroundColor: '#000' }}>
         <StatusBar hidden={!!imageUri} />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close photo"
           onPress={onClose}
           style={{
             position: 'absolute',
@@ -44,7 +46,13 @@ export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageView
         >
           <Ionicons name="close" size={20} color="#fff" />
         </Pressable>
-        <Pressable onPress={onClose} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Recipe photo, full screen"
+          accessibilityHint="Tap anywhere to close"
+          onPress={onClose}
+          style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+        >
           {imageUri ? (
             <Image
               source={{ uri: imageUri }}

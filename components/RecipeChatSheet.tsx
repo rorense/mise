@@ -54,7 +54,9 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
 
   const send = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || !ctx) return;
+    // `busy` guard: without it, repeated taps fire concurrent requests whose
+    // replies append out of order.
+    if (!trimmed || !ctx || busy) return;
     const sys = recipeToChatSystemPrompt(ctx.recipe, ctx.servings);
     const nextUser: LlmMessage = { role: 'user', content: trimmed };
     const history = [...messages, nextUser].slice(-20);
@@ -115,6 +117,9 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
             {suggestions.map((s: string, i: number) => (
               <Pressable
                 key={i}
+                accessibilityRole="button"
+                accessibilityLabel={s}
+                accessibilityHint="Sends this question to the assistant"
                 onPress={() => send(s)}
                 style={{
                   paddingHorizontal: 12,
@@ -133,6 +138,8 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
         {messages.map((m, idx) => (
           <View
             key={idx}
+            accessible
+            accessibilityLabel={`${m.role === 'user' ? 'You' : 'Assistant'}: ${m.content}`}
             style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               backgroundColor: m.role === 'user' ? colors.primary + '22' : colors.background,
@@ -160,6 +167,7 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
         }}
       >
         <BottomSheetTextInput
+          accessibilityLabel="Ask about this recipe"
           value={input}
           onChangeText={setInput}
           placeholder="Ask about this recipe…"
@@ -177,12 +185,17 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
           }}
         />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
+          accessibilityState={{ disabled: busy || !input.trim() }}
+          disabled={busy || !input.trim()}
           onPress={() => send(input)}
           style={{
             paddingHorizontal: 16,
             paddingVertical: 12,
             backgroundColor: colors.primary,
             borderRadius: 12,
+            opacity: busy || !input.trim() ? 0.5 : 1,
           }}
         >
           <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Send</Text>

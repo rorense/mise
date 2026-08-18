@@ -45,7 +45,12 @@ export default function CookLogScreen() {
       <BackButton />
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 40 }}>
         {log.photoUri ? (
-          <Pressable onPress={() => setFullscreenImageUri(log.photoUri ?? null)}>
+          <Pressable
+            accessibilityRole="imagebutton"
+            accessibilityLabel="Cook photo"
+            accessibilityHint="Opens the photo full screen"
+            onPress={() => setFullscreenImageUri(log.photoUri ?? null)}
+          >
             <Image source={{ uri: log.photoUri }} style={{ width: '100%', height: 280 }} />
           </Pressable>
         ) : null}
@@ -67,6 +72,8 @@ export default function CookLogScreen() {
           <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>No notes</Text>
         )}
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Delete this cook log entry"
           onPress={() => setShowDeleteConfirm(true)}
           style={{ marginTop: 16 }}
         >

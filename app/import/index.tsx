@@ -1,6 +1,5 @@
 import { AppDialog, type AppDialogAction } from '@/components/AppDialog';
-import { getActiveAiProvider, getBundledAiKey } from '@/lib/aiConfig';
-import { getYoutubeApiKey } from '@/lib/secrets';
+import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { BackButton } from '@/components/BackButton';
 import {
   importFromManualText,
@@ -60,17 +59,20 @@ export default function ImportScreen() {
       });
       return null;
     }
-    const provider = await getActiveAiProvider();
-    const key = getBundledAiKey(provider);
-    if (!key) {
+    const credentials = await getAiCredentials();
+    if (!credentials.ok) {
+      const { title, message } = describeAiUnavailable(
+        credentials.reason,
+        credentials.provider
+      );
       setDialog({
-        title: 'API key',
-        message: `Missing ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in local env.`,
+        title,
+        message,
         actions: [{ label: 'OK', variant: 'primary' }],
       });
       return null;
     }
-    return { provider, key };
+    return { provider: credentials.provider, key: credentials.apiKey };
   };
 
   const runUrlImport = async () => {
@@ -78,7 +80,7 @@ export default function ImportScreen() {
     if (!trimmedUrl) {
       setDialog({
         title: 'Missing URL',
-        message: 'Paste a recipe or YouTube link first.',
+        message: 'Paste a recipe link first.',
         actions: [{ label: 'OK', variant: 'primary' }],
       });
       return;
@@ -97,10 +99,9 @@ export default function ImportScreen() {
     if (!ai) {
       return;
     }
-    const yt = await getYoutubeApiKey();
     setBusy(true);
     try {
-      const draft = await importFromUrl(trimmedUrl, ai.provider, ai.key, yt);
+      const draft = await importFromUrl(trimmedUrl, ai.provider, ai.key);
       setImportDraft(draft);
       router.push('/recipe/form');
     } catch (e) {
@@ -182,6 +183,9 @@ export default function ImportScreen() {
         </Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Import from a web page"
+          accessibilityState={{ selected: tab === 'url' }}
           onPress={() => setTab('url')}
           style={{
             paddingHorizontal: 14,
@@ -192,9 +196,12 @@ export default function ImportScreen() {
             borderColor: tab === 'url' ? colors.primary : colors.border,
           }}
         >
-          <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>URL / YouTube</Text>
+          <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>Web page</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Import by pasting text"
+          accessibilityState={{ selected: tab === 'paste' }}
           onPress={() => setTab('paste')}
           style={{
             paddingHorizontal: 14,
@@ -215,6 +222,7 @@ export default function ImportScreen() {
             Paste a full recipe block (notes, article text, caption, or copied page), and AI will split it into ingredients and steps.
           </Text>
           <TextInput
+            accessibilityLabel="Recipe text to import"
             multiline
             value={batchText}
             onChangeText={setBatchText}
@@ -234,6 +242,9 @@ export default function ImportScreen() {
             }}
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={busy ? 'Importing recipe' : 'Import pasted text'}
+            accessibilityState={{ disabled: busy, busy }}
             disabled={busy}
             onPress={runBatchPasteImport}
             style={{
@@ -254,6 +265,7 @@ export default function ImportScreen() {
       ) : (
         <>
           <TextInput
+            accessibilityLabel="Recipe URL"
             value={url}
             onChangeText={setUrl}
             onFocus={scrollFocusedInputIntoView}
@@ -271,6 +283,9 @@ export default function ImportScreen() {
             }}
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={busy ? 'Importing recipe' : 'Import from this URL'}
+            accessibilityState={{ disabled: busy, busy }}
             disabled={busy}
             onPress={runUrlImport}
             style={{
@@ -290,7 +305,11 @@ export default function ImportScreen() {
         </>
       )}
 
-        <Pressable onPress={() => router.replace('/recipe/form')}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Enter a recipe manually instead"
+          onPress={() => router.replace('/recipe/form')}
+        >
           <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Enter manually instead</Text>
         </Pressable>
       </ScrollView>

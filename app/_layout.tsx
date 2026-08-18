@@ -111,7 +111,6 @@ export default function RootLayout() {
     DMSans_700Bold,
   });
   const [dbReady, setDbReady] = useState(false);
-  const [bootDelayDone, setBootDelayDone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,14 +136,7 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setBootDelayDone(true);
-    }, 700);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const appReady = loaded && dbReady && bootDelayDone;
+  const appReady = loaded && dbReady;
   const bootDark = system === 'dark';
 
   return (

@@ -1,3 +1,5 @@
+import { fetchWithTimeout, LLM_TIMEOUT_MS } from '@/lib/http';
+
 const GEMINI_BASE =
   'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -24,25 +26,29 @@ export async function geminiCompletion(
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
     }));
-  const res = await fetch(`${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ...(systemText
-        ? {
-            systemInstruction: {
-              parts: [{ text: systemText }],
-            },
-          }
-        : {}),
-      contents,
-      generationConfig: {
-        temperature,
+  const res = await fetchWithTimeout(
+    `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-    }),
-  });
+      body: JSON.stringify({
+        ...(systemText
+          ? {
+              systemInstruction: {
+                parts: [{ text: systemText }],
+              },
+            }
+          : {}),
+        contents,
+        generationConfig: {
+          temperature,
+        },
+      }),
+    },
+    LLM_TIMEOUT_MS
+  );
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Gemini error ${res.status}: ${text.slice(0, 400)}`);

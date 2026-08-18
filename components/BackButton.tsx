@@ -42,6 +42,8 @@ export function BackButton({
       }}
     >
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
         onPress={handlePress}
         hitSlop={10}
         style={{

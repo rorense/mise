@@ -2,6 +2,7 @@ import { saveRecipe } from '@/data/recipes';
 import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import { newId } from '@/lib/id';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { takeImportDraft } from '@/lib/importDraftStore';
 import {
   KEYBOARD_AVOIDING_BEHAVIOR,
@@ -11,8 +12,9 @@ import {
 import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -26,6 +28,24 @@ export default function ImportPreviewScreen() {
   const router = useRouter();
   const { scrollRef, scrollFocusedInputIntoView } = useKeyboardSafeScroll<ScrollView>();
   const [draft, setDraft] = useState<Omit<Recipe, 'cookLogs'> | null>(() => takeImportDraft());
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  const leaveScreen = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
+
+  // Leaving here throws away a whole imported recipe, so it gets the same
+  // confirmation as the editor.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setShowDiscardConfirm(true);
+      return true;
+    });
+    return () => subscription.remove();
+  }, []);
   const [ingredientText, setIngredientText] = useState(() =>
     (draft?.ingredients ?? [])
       .map(
@@ -96,15 +116,18 @@ export default function ImportPreviewScreen() {
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean);
-    const next = lines.map((instruction, idx) => {
-      const existing = draft.steps[idx];
-      return {
-        id: existing?.id ?? newId(),
-        order: idx,
-        instruction,
-        scalableQuantities: existing?.scalableQuantities ?? [],
-      };
-    });
+    // Placeholders belong to the text they appear in, not to a row position.
+    // Matching by index reattached them to whichever line happened to land at
+    // that offset once a line was inserted or deleted.
+    const allQuantities = draft.steps.flatMap((step) => step.scalableQuantities);
+    const next = lines.map((instruction, idx) => ({
+      id: draft.steps[idx]?.id ?? newId(),
+      order: idx,
+      instruction,
+      scalableQuantities: allQuantities.filter((quantity) =>
+        instruction.includes(quantity.placeholder)
+      ),
+    }));
     return { ...draft, steps: next };
   };
 
@@ -115,7 +138,7 @@ export default function ImportPreviewScreen() {
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
+      <BackButton onPress={() => setShowDiscardConfirm(true)} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -169,6 +192,7 @@ export default function ImportPreviewScreen() {
         Ingredients (qty|unit|name|y/n|notes|exact/to_taste)
       </Text>
       <TextInput
+        accessibilityLabel="Ingredients, one per line"
         multiline
         value={ingredientText}
         onChangeText={setIngredientText}
@@ -190,6 +214,7 @@ export default function ImportPreviewScreen() {
         Steps (one per line)
       </Text>
       <TextInput
+        accessibilityLabel="Method steps, one per line"
         multiline
         value={stepText}
         onChangeText={setStepText}
@@ -208,7 +233,15 @@ export default function ImportPreviewScreen() {
         }}
       />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe to library'}
+          accessibilityState={{ disabled: isSaving, busy: isSaving }}
+          disabled={isSaving}
           onPress={async () => {
+            // saveRecipe opens its own transaction, and SQLite has no nested
+            // transactions — a second tap mid-save fails the whole write.
+            if (isSaving) return;
+            setIsSaving(true);
             const withIngredients = parseIngredientLines();
             const withSteps = {
               ...withIngredients,
@@ -219,7 +252,11 @@ export default function ImportPreviewScreen() {
               await saveRecipe(withSteps);
               router.replace(`/recipe/${withSteps.id}`);
             } catch (e) {
-              alert(e instanceof Error ? `Save failed: ${e.message}` : 'Save failed.');
+              setSaveError(
+                e instanceof Error ? e.message : 'Unknown error while saving.'
+              );
+            } finally {
+              setIsSaving(false);
             }
           }}
           style={{
@@ -228,13 +265,34 @@ export default function ImportPreviewScreen() {
             borderRadius: 14,
             alignItems: 'center',
             marginTop: 8,
+            opacity: isSaving ? 0.6 : 1,
           }}
         >
           <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            Save to library
+            {isSaving ? 'Saving…' : 'Save to library'}
           </Text>
         </Pressable>
       </ScrollView>
+      <ConfirmDialog
+        visible={showDiscardConfirm}
+        destructive
+        title="Discard this import?"
+        message="The imported recipe has not been saved to your library."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={() => {
+          setShowDiscardConfirm(false);
+          leaveScreen();
+        }}
+        onCancel={() => setShowDiscardConfirm(false)}
+      />
+      <AppDialog
+        visible={saveError !== null}
+        title="Could not save recipe"
+        message={saveError ?? ''}
+        actions={[{ label: 'OK', variant: 'primary' }]}
+        onClose={() => setSaveError(null)}
+      />
     </View>
     </KeyboardAvoidingView>
   );
@@ -267,6 +325,7 @@ function Field({
         {label}
       </Text>
       <TextInput
+        accessibilityLabel={label}
         value={value}
         onChangeText={onChange}
         onFocus={onFocus}

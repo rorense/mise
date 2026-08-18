@@ -1,6 +1,14 @@
 node_modules/
 .expo/
 dist/
+
+# Build output and tool logs. The Expo export bundle in particular inlines
+# every EXPO_PUBLIC_* value at build time, so it must never be committed.
+.expo-export-check/
+*.log
+npm-install-output.txt
+tsc-out.txt
+
 *.jks
 *.p8
 *.p12

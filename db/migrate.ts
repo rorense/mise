@@ -118,10 +118,18 @@ const MIGRATIONS: Record<number, string> = {
   9: `
     ALTER TABLE ingredients ADD COLUMN is_section_heading INTEGER NOT NULL DEFAULT 0;
   `,
+  10: `
+    CREATE INDEX IF NOT EXISTS idx_recipe_tags_tag ON recipe_tags(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_steps_recipe_order ON steps(recipe_id, order_idx);
+    CREATE INDEX IF NOT EXISTS idx_ingredients_recipe_sort ON ingredients(recipe_id, sort_order);
+  `,
 };
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA foreign_keys = ON;');
+  // WAL lets reads proceed while a write is in flight — the right mode for a
+  // read-heavy local store. Must be set outside a transaction.
+  await db.execAsync('PRAGMA journal_mode = WAL;');
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY NOT NULL
@@ -163,8 +171,15 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
           continue;
         }
       }
-      await db.execAsync(MIGRATIONS[version]);
-      await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
+      // The DDL and its version row commit together. Without this a migration
+      // that fails halfway leaves its statements applied but unrecorded, so the
+      // next launch replays it and dies on "duplicate column" — permanently.
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(MIGRATIONS[version]);
+        await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [
+          version,
+        ]);
+      });
       current = version;
     }
   }
