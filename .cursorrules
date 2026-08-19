@@ -5,6 +5,24 @@
 - **UI:** Functional components only; no class components. Every interactive
   element needs `accessibilityLabel` + `accessibilityRole`, and stateful ones
   need `accessibilityState`.
+- **Design system:** Build screens from `components/ui` (`Screen`, `Button`,
+  `IconButton`, `Card`, `Chip`, `TextField`, `SegmentedControl`, `SwitchRow`,
+  `Text`, `ModalCard`, `Section`, `ImageScrim`). Do not hand-roll a `Pressable`
+  that one of these already covers.
+- **Styling:** Spacing, radii, type and elevation come from `theme/tokens.ts`;
+  colours from `theme/colors.ts`. **No raw numbers** for padding, margin, gap,
+  `borderRadius` or `fontSize` (bare `Text` and `fontFamily` strings included),
+  and **no hex literals** outside `theme/`. The one exception is a radius that
+  is half a known pixel size, to make a circle.
+- **Touch feedback:** Every `Pressable` needs `android_ripple={ripple(...)}`
+  plus `pressedStyle(pressed)` from `components/ui/press`. Targets are 48dp
+  minimum; use `hitSlopFor(size)` when the control must look smaller.
+- **Elevation:** Use `elevation(level, resolved)` from `theme/tokens.ts`. Never
+  set `shadowOpacity`/`shadowRadius` directly — Android ignores them, and dark
+  mode gets its depth from borders and `surfaceMuted` instead.
+- **Contrast:** Text on a filled control uses the matching `on*` token
+  (`onPrimaryFill`, `onPrimarySoft`, `onDestructiveFill`), never `'#fff'`. The
+  pairs in `theme/colors.ts` are chosen to clear WCAG AA in both modes.
 - **Storage:** `expo-sqlite` for all structured recipe data; `expo-file-system` for cook photos; `expo-secure-store` for appearance and onboarding preferences.
 - **Secrets:** API keys currently come from `EXPO_PUBLIC_*` env vars, which Metro
   **inlines into the shipped bundle** — they are not secret. Do not commit build

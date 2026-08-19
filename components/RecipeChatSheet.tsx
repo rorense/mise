@@ -1,9 +1,16 @@
+import { Button, Chip, Text } from '@/components/ui';
 import { recipeToChatSystemPrompt } from '@/lib/chatPrompt';
 import { llmCompletion, type LlmMessage } from '@/lib/llm';
 import type { AiProvider } from '@/lib/secrets';
-import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
-import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
+import { radius, space, typeScale } from '@/theme/tokens';
+import type { Recipe } from '@/types/recipe';
+import {
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import React, {
   forwardRef,
   useCallback,
@@ -12,7 +19,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type RecipeChatSheetRef = {
   present: (
@@ -23,8 +31,12 @@ export type RecipeChatSheetRef = {
   ) => void;
 };
 
+/** Height of the pinned composer, so the scroll area can clear it. */
+const COMPOSER_HEIGHT = 108;
+
 export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeChatSheet(_, ref) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const modalRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%', '90%'], []);
   const [messages, setMessages] = useState<LlmMessage[]>([]);
@@ -92,6 +104,8 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
       ? ['Can I freeze the dough?', 'Why rest the dough?', 'Whole-wheat swap?']
       : ['Good substitutions?', 'Make it dairy-free?', "What does 'fold' mean here?"];
 
+  const sendDisabled = busy || input.trim().length === 0;
+
   return (
     <BottomSheetModal
       ref={modalRef}
@@ -103,67 +117,90 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
         setCtx(null);
       }}
       backgroundStyle={{ backgroundColor: colors.surface }}
-      handleIndicatorStyle={{ backgroundColor: colors.border }}
+      handleIndicatorStyle={{ backgroundColor: colors.borderStrong }}
     >
-      <BottomSheetScrollView contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 120 }}>
-        <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 18, color: colors.textPrimary }}>
+      <BottomSheetScrollView
+        contentContainerStyle={{
+          padding: space.lg,
+          gap: space.sm,
+          paddingBottom: COMPOSER_HEIGHT + insets.bottom,
+        }}
+      >
+        <Text variant="heading" accessibilityRole="header">
           Cooking assistant
         </Text>
-        <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
+        <Text variant="caption" tone="secondary">
           Scoped to this recipe. Session clears when you close the sheet.
         </Text>
+
         {messages.length === 0 ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 }}>
-            {suggestions.map((s: string, i: number) => (
-              <Pressable
-                key={i}
-                accessibilityRole="button"
-                accessibilityLabel={s}
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              gap: space.sm,
+              marginVertical: space.sm,
+            }}
+          >
+            {suggestions.map((s) => (
+              <Chip
+                key={s}
+                label={s}
                 accessibilityHint="Sends this question to the assistant"
                 onPress={() => send(s)}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 999,
-                  backgroundColor: colors.background,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                }}
-              >
-                <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_400Regular' }}>{s}</Text>
-              </Pressable>
+              />
             ))}
           </View>
         ) : null}
-        {messages.map((m, idx) => (
-          <View
-            key={idx}
-            accessible
-            accessibilityLabel={`${m.role === 'user' ? 'You' : 'Assistant'}: ${m.content}`}
-            style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              backgroundColor: m.role === 'user' ? colors.primary + '22' : colors.background,
-              padding: 12,
-              borderRadius: 14,
-              maxWidth: '90%',
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          >
-            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textPrimary }}>{m.content}</Text>
-          </View>
-        ))}
-        {busy ? <ActivityIndicator color={colors.primary} /> : null}
+
+        {messages.map((m, idx) => {
+          const fromUser = m.role === 'user';
+          return (
+            <View
+              key={idx}
+              accessible
+              accessibilityLabel={`${fromUser ? 'You' : 'Assistant'}: ${m.content}`}
+              style={{
+                alignSelf: fromUser ? 'flex-end' : 'flex-start',
+                backgroundColor: fromUser ? colors.primarySoft : colors.surfaceMuted,
+                padding: space.md,
+                // Squaring off the corner nearest the speaker is what makes the
+                // two sides readable at a glance without a label.
+                borderRadius: radius.lg,
+                borderBottomRightRadius: fromUser ? radius.xs : radius.lg,
+                borderBottomLeftRadius: fromUser ? radius.lg : radius.xs,
+                maxWidth: '90%',
+                borderWidth: 1,
+                borderColor: fromUser ? 'transparent' : colors.border,
+              }}
+            >
+              <Text variant="body" tone={fromUser ? 'onAccentSoft' : 'primary'}>
+                {m.content}
+              </Text>
+            </View>
+          );
+        })}
+
+        {busy ? (
+          <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start' }} />
+        ) : null}
       </BottomSheetScrollView>
+
       <View
         style={{
           position: 'absolute',
-          left: 12,
-          right: 12,
-          bottom: 12,
+          left: 0,
+          right: 0,
+          bottom: 0,
           flexDirection: 'row',
-          gap: 8,
-          alignItems: 'center',
+          gap: space.sm,
+          alignItems: 'flex-end',
+          paddingHorizontal: space.lg,
+          paddingTop: space.md,
+          paddingBottom: insets.bottom + space.md,
+          backgroundColor: colors.surface,
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
         }}
       >
         <BottomSheetTextInput
@@ -172,34 +209,27 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
           onChangeText={setInput}
           placeholder="Ask about this recipe…"
           placeholderTextColor={colors.textSecondary}
+          multiline
           style={{
+            ...typeScale.body,
             flex: 1,
+            maxHeight: 96,
             borderWidth: 1,
             borderColor: colors.border,
-            borderRadius: 12,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            fontFamily: 'DMSans_400Regular',
+            borderRadius: radius.md,
+            paddingHorizontal: space.md,
+            paddingVertical: space.md,
             color: colors.textPrimary,
-            backgroundColor: colors.surface,
+            backgroundColor: colors.background,
           }}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          accessibilityState={{ disabled: busy || !input.trim() }}
-          disabled={busy || !input.trim()}
+        <Button
+          label="Send"
           onPress={() => send(input)}
-          style={{
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            backgroundColor: colors.primary,
-            borderRadius: 12,
-            opacity: busy || !input.trim() ? 0.5 : 1,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Send</Text>
-        </Pressable>
+          disabled={sendDisabled}
+          loading={busy}
+          accessibilityLabel="Send message"
+        />
       </View>
     </BottomSheetModal>
   );

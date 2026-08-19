@@ -1,3 +1,8 @@
+import { getDatabase } from '@/db/client';
+import { configureGlobalNotificationHandler } from '@/lib/timerNotifications';
+import { palette } from '@/theme/colors';
+import { ThemeProvider as AppThemeProvider, useTheme } from '@/theme/ThemeContext';
+import { fontFamily, space, typeScale } from '@/theme/tokens';
 import {
   DMSans_400Regular,
   DMSans_500Medium,
@@ -10,16 +15,13 @@ import {
   DefaultTheme as NavigationDefaultTheme,
   ThemeProvider as NavigationThemeProvider,
 } from '@react-navigation/native';
-import { getDatabase } from '@/db/client';
-import { configureGlobalNotificationHandler } from '@/lib/timerNotifications';
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useFonts } from 'expo-font';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Text, View, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StatusBar } from 'expo-status-bar';
-import { ThemeProvider as AppThemeProvider, useTheme } from '@/theme/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -53,7 +55,7 @@ function ThemedStack() {
             headerShown: false,
             headerStyle: { backgroundColor: colors.surface },
             headerTintColor: colors.textPrimary,
-            headerTitleStyle: { fontFamily: 'Lora_700Bold' },
+            headerTitleStyle: { fontFamily: fontFamily.serifBold },
             contentStyle: { backgroundColor: colors.background },
           }}
         >
@@ -64,38 +66,49 @@ function ThemedStack() {
   );
 }
 
+/**
+ * Shown while the fonts and the database open. It cannot use the theme — the
+ * provider is not mounted yet — so it reads the palette directly off the
+ * system colour scheme rather than hard-coding a second set of hexes that
+ * would drift from the real one.
+ */
 function InitialLoadingScreen({ dark }: { dark: boolean }) {
+  const colors = palette[dark ? 'dark' : 'light'];
   return (
     <View
       style={{
         flex: 1,
-        backgroundColor: dark ? '#0B0B0B' : '#FFFFFF',
+        backgroundColor: colors.background,
         alignItems: 'center',
         justifyContent: 'center',
+        gap: space.md,
       }}
     >
       <Image
         source={require('../assets/icon.png')}
-        style={{ width: 84, height: 84, borderRadius: 20, marginBottom: 14 }}
+        style={{ width: 84, height: 84, borderRadius: 20 }}
       />
+      {/* Sizes from the type scale, but no `fontFamily`: this renders before
+          `useFonts` resolves, and naming a family that has not loaded yet
+          leaves the text blank on Android. */}
       <Text
         style={{
-          fontSize: 34,
-          color: dark ? '#F2F2F2' : '#1A1A1A',
-          marginBottom: 12,
+          fontSize: typeScale.display.fontSize,
+          lineHeight: typeScale.display.lineHeight,
+          color: colors.textPrimary,
         }}
       >
         Mise en
       </Text>
-      <ActivityIndicator size="small" color="#C4622D" />
+      <ActivityIndicator size="small" color={colors.primary} />
       <Text
         style={{
-          marginTop: 10,
-          color: dark ? '#B3B3B3' : '#6B6B6B',
-          fontSize: 13,
+          fontSize: typeScale.caption.fontSize,
+          lineHeight: typeScale.caption.lineHeight,
+          color: colors.textSecondary,
         }}
       >
-        Preparing your kitchen...
+        Preparing your kitchen…
       </Text>
     </View>
   );
@@ -141,7 +154,10 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView
-      style={{ flex: 1, backgroundColor: bootDark ? '#0B0B0B' : '#FFFFFF' }}
+      style={{
+        flex: 1,
+        backgroundColor: palette[bootDark ? 'dark' : 'light'].background,
+      }}
     >
       {appReady ? (
         <AppThemeProvider>

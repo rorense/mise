@@ -1,18 +1,26 @@
-import { useTheme } from '@/theme/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
+import { IconButton } from '@/components/ui';
+import { space } from '@/theme/tokens';
 import { useRouter } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+/**
+ * A back arrow that floats over the content beneath it. Use this only where the
+ * screen opens on full-bleed media; anywhere else the inline header on
+ * `components/ui/Screen` is the right choice, because it cannot overlap the
+ * title.
+ */
 export function BackButton({
   topOffset = 0,
   onPress,
+  /** Set when the button sits over a photo rather than the page background. */
+  overImage = false,
 }: {
   topOffset?: number;
   onPress?: () => void;
+  overImage?: boolean;
 }) {
   const router = useRouter();
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   const handlePress = () => {
@@ -20,45 +28,25 @@ export function BackButton({
       onPress();
       return;
     }
-    const maybeRouter = router as unknown as {
-      canGoBack?: () => boolean;
-      back: () => void;
-      replace: (href: string) => void;
-    };
-    if (maybeRouter.canGoBack?.()) {
-      maybeRouter.back();
-      return;
-    }
-    maybeRouter.replace('/');
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
   };
 
   return (
     <View
       style={{
         position: 'absolute',
-        left: 16,
-        top: insets.top + 10 + topOffset,
+        left: space.lg,
+        top: insets.top + space.md + topOffset,
         zIndex: 50,
       }}
     >
-      <Pressable
-        accessibilityRole="button"
+      <IconButton
+        icon="chevron-back"
         accessibilityLabel="Go back"
         onPress={handlePress}
-        hitSlop={10}
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: colors.surface,
-          borderWidth: 1,
-          borderColor: colors.border,
-        }}
-      >
-        <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-      </Pressable>
+        variant={overImage ? 'onImage' : 'surface'}
+      />
     </View>
   );
 }

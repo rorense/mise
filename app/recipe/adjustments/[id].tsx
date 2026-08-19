@@ -1,4 +1,5 @@
-import { BackButton } from '@/components/BackButton';
+import { Button, Screen, Text } from '@/components/ui';
+import { pressedStyle, ripple } from '@/components/ui/press';
 import {
   applyRecipeAdjustment,
   getRecipeAdjustmentById,
@@ -6,12 +7,13 @@ import {
   ignoreRecipeAdjustment,
 } from '@/data/recipes';
 import { formatQuantity } from '@/domain/scaling';
-import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
+import { radius, space } from '@/theme/tokens';
+import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 export default function RecipeAdjustmentsReviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -65,7 +67,7 @@ export default function RecipeAdjustmentsReviewScreen() {
           backgroundColor: colors.background,
         }}
       >
-        <Text style={{ color: colors.textSecondary }}>Loading…</Text>
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -78,176 +80,178 @@ export default function RecipeAdjustmentsReviewScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: colors.background,
-          paddingHorizontal: 24,
-          gap: 10,
+          paddingHorizontal: space.xxl,
+          gap: space.lg,
         }}
       >
-        <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 20 }}>
+        <Ionicons name="checkmark-circle-outline" size={44} color={colors.textSecondary} />
+        <Text variant="heading" accessibilityRole="header">
           No pending suggestions
         </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to library"
+        <Button
+          label="Back to library"
           onPress={() => router.replace('/')}
-          style={{
-            backgroundColor: colors.primary,
-            borderRadius: 12,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Back to library</Text>
-        </Pressable>
+        />
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
-      <ScrollView
-        contentContainerStyle={{ padding: 20, paddingTop: 72, paddingBottom: 48, gap: 12 }}
-      >
-        <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-          Review suggested updates
-        </Text>
-        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-          {recipe.title} · {suggestionCount} suggestion{suggestionCount === 1 ? '' : 's'}
-        </Text>
-
-        {adjustment.suggestions.map((suggestion) => {
-          const selected = selectedSuggestionIds.includes(suggestion.id);
-          const ingredient =
-            suggestion.type === 'step_instruction'
-              ? null
-              : recipe.ingredients.find((ing) => ing.id === suggestion.ingredientId);
-          const step =
-            suggestion.type === 'step_instruction'
-              ? recipe.steps.find((s) => s.id === suggestion.stepId)
-              : null;
-          let title = '';
-          let before = '';
-          let after = '';
-          if (suggestion.type === 'ingredient_quantity') {
-            title = ingredient?.name ?? 'Ingredient';
-            before = ingredient
-              ? formatQuantity(ingredient.quantity, ingredient.unit)
-              : '';
-            after = ingredient
-              ? formatQuantity(suggestion.nextQuantity, ingredient.unit)
-              : String(suggestion.nextQuantity);
-          } else if (suggestion.type === 'ingredient_amount_mode') {
-            title = ingredient?.name ?? 'Ingredient';
-            before = ingredient?.amountMode === 'to_taste' ? 'to taste' : 'exact amount';
-            after = suggestion.nextAmountMode === 'to_taste' ? 'to taste' : 'exact amount';
-          } else {
-            title = `Step ${(step?.order ?? 0) + 1}`;
-            before = step?.instruction ?? '';
-            after = suggestion.nextInstruction;
-          }
-          return (
-            <Pressable
-              key={suggestion.id}
-              accessibilityRole="checkbox"
-              accessibilityLabel={`${title}: change ${before || 'nothing'} to ${after}`}
-              accessibilityState={{ checked: selected }}
-              onPress={() =>
-                setSelectedSuggestionIds((prev) =>
-                  selected
-                    ? prev.filter((item) => item !== suggestion.id)
-                    : [...prev, suggestion.id]
-                )
+    <Screen
+      scroll
+      header={{ title: 'Review updates', back: true }}
+      gap={space.md}
+      footer={
+        <View style={{ gap: space.sm }}>
+          <Button
+            label={`Apply selected (${selectedSuggestionIds.length})`}
+            fullWidth
+            size="lg"
+            disabled={!applyEnabled}
+            loading={busyAction === 'apply'}
+            accessibilityLabel={`Apply ${selectedSuggestionIds.length} selected updates`}
+            onPress={async () => {
+              setBusyAction('apply');
+              const success = await applyRecipeAdjustment({
+                adjustmentId: adjustment.id,
+                selectedSuggestionIds,
+              });
+              setBusyAction(null);
+              if (success) {
+                router.replace(`/recipe/${adjustment.recipeId}`);
               }
-              style={{
+            }}
+          />
+          <Button
+            label="Ignore suggestions"
+            variant="secondary"
+            fullWidth
+            disabled={busyAction !== null}
+            loading={busyAction === 'ignore'}
+            accessibilityLabel="Ignore these suggested updates"
+            onPress={async () => {
+              setBusyAction('ignore');
+              await ignoreRecipeAdjustment(adjustment.id);
+              setBusyAction(null);
+              router.replace(`/recipe/${adjustment.recipeId}`);
+            }}
+          />
+        </View>
+      }
+    >
+      <Text variant="body" tone="secondary">
+        {recipe.title} · {suggestionCount} suggestion{suggestionCount === 1 ? '' : 's'}
+      </Text>
+
+      {adjustment.suggestions.map((suggestion) => {
+        const selected = selectedSuggestionIds.includes(suggestion.id);
+        const ingredient =
+          suggestion.type === 'step_instruction'
+            ? null
+            : recipe.ingredients.find((ing) => ing.id === suggestion.ingredientId);
+        const step =
+          suggestion.type === 'step_instruction'
+            ? recipe.steps.find((s) => s.id === suggestion.stepId)
+            : null;
+        let title = '';
+        let before = '';
+        let after = '';
+        if (suggestion.type === 'ingredient_quantity') {
+          title = ingredient?.name ?? 'Ingredient';
+          before = ingredient ? formatQuantity(ingredient.quantity, ingredient.unit) : '';
+          after = ingredient
+            ? formatQuantity(suggestion.nextQuantity, ingredient.unit)
+            : String(suggestion.nextQuantity);
+        } else if (suggestion.type === 'ingredient_amount_mode') {
+          title = ingredient?.name ?? 'Ingredient';
+          before = ingredient?.amountMode === 'to_taste' ? 'to taste' : 'exact amount';
+          after = suggestion.nextAmountMode === 'to_taste' ? 'to taste' : 'exact amount';
+        } else {
+          title = `Step ${(step?.order ?? 0) + 1}`;
+          before = step?.instruction ?? '';
+          after = suggestion.nextInstruction;
+        }
+        return (
+          <Pressable
+            key={suggestion.id}
+            accessibilityRole="checkbox"
+            accessibilityLabel={`${title}: change ${before || 'nothing'} to ${after}`}
+            accessibilityState={{ checked: selected }}
+            onPress={() =>
+              setSelectedSuggestionIds((prev) =>
+                selected
+                  ? prev.filter((item) => item !== suggestion.id)
+                  : [...prev, suggestion.id]
+              )
+            }
+            android_ripple={ripple(colors.ripple)}
+            style={({ pressed }) => [
+              {
                 borderWidth: 1,
                 borderColor: selected ? colors.primary : colors.border,
-                backgroundColor: selected ? colors.primary + '18' : colors.surface,
-                borderRadius: 14,
-                padding: 12,
-                gap: 8,
+                backgroundColor: selected ? colors.primarySoft : colors.surface,
+                borderRadius: radius.lg,
+                padding: space.lg,
+                gap: space.sm,
+                overflow: 'hidden',
+              },
+              pressedStyle(pressed),
+            ]}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: space.sm,
               }}
             >
-              <View
-                style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+              <Text
+                variant="bodyStrong"
+                tone={selected ? 'onAccentSoft' : 'primary'}
+                style={{ flex: 1 }}
               >
-                <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-                  {title}
-                </Text>
-                <Ionicons
-                  name={selected ? 'checkbox' : 'square-outline'}
-                  size={18}
-                  color={selected ? colors.primary : colors.textSecondary}
-                />
-              </View>
-              <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_400Regular' }}>
+                {title}
+              </Text>
+              <Ionicons
+                name={selected ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={selected ? colors.onPrimarySoft : colors.textSecondary}
+              />
+            </View>
+
+            {/* The before/after pair is the whole point of the row, so it gets
+                its own strip rather than being run together in a sentence. */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: space.sm,
+              }}
+            >
+              <Text
+                variant="caption"
+                tone="secondary"
+                style={{ textDecorationLine: 'line-through' }}
+              >
                 {before}
-                {' -> '}
+              </Text>
+              <Ionicons name="arrow-forward" size={13} color={colors.textSecondary} />
+              <Text variant="captionStrong" tone={selected ? 'onAccentSoft' : 'primary'}>
                 {after}
               </Text>
-              <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                {suggestion.reason}
-              </Text>
-              <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                Evidence: "{suggestion.noteEvidence}"
-              </Text>
-            </Pressable>
-          );
-        })}
+            </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Apply ${selectedSuggestionIds.length} selected updates`}
-          accessibilityState={{ disabled: !applyEnabled }}
-          disabled={!applyEnabled}
-          onPress={async () => {
-            setBusyAction('apply');
-            const success = await applyRecipeAdjustment({
-              adjustmentId: adjustment.id,
-              selectedSuggestionIds,
-            });
-            setBusyAction(null);
-            if (success) {
-              router.replace(`/recipe/${adjustment.recipeId}`);
-            }
-          }}
-          style={{
-            backgroundColor: colors.primary,
-            borderRadius: 14,
-            alignItems: 'center',
-            padding: 14,
-            opacity: applyEnabled ? 1 : 0.5,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            Apply selected ({selectedSuggestionIds.length})
-          </Text>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Ignore these suggested updates"
-          accessibilityState={{ disabled: busyAction !== null }}
-          disabled={busyAction !== null}
-          onPress={async () => {
-            setBusyAction('ignore');
-            await ignoreRecipeAdjustment(adjustment.id);
-            setBusyAction(null);
-            router.replace(`/recipe/${adjustment.recipeId}`);
-          }}
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 14,
-            alignItems: 'center',
-            padding: 14,
-            backgroundColor: colors.surface,
-          }}
-        >
-          <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
-            Ignore suggestions
-          </Text>
-        </Pressable>
-      </ScrollView>
-    </View>
+            <Text variant="caption" tone="secondary">
+              {suggestion.reason}
+            </Text>
+            <Text variant="caption" tone="secondary" style={{ fontStyle: 'italic' }}>
+              Evidence: “{suggestion.noteEvidence}”
+            </Text>
+          </Pressable>
+        );
+      })}
+    </Screen>
   );
 }

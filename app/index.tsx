@@ -1,4 +1,15 @@
 import {
+  Button,
+  Card,
+  Chip,
+  IconButton,
+  ImageScrim,
+  ModalCard,
+  Text,
+  TextField,
+} from '@/components/ui';
+import { pressedStyle, ripple } from '@/components/ui/press';
+import {
   getAllCuisines,
   getAllTags,
   listRecipeCards,
@@ -6,22 +17,20 @@ import {
   type LibrarySort,
   type RecipeListItem,
 } from '@/data/recipes';
-import { getOnboarded } from '@/lib/secrets';
-import { useTheme } from '@/theme/ThemeContext';
 import { drainOfflineAiQueue } from '@/lib/ai/offlineQueue';
+import { getOnboarded } from '@/lib/secrets';
 import type { ThemeColors } from '@/theme/colors';
+import { useTheme } from '@/theme/ThemeContext';
+import { elevation, radius, space } from '@/theme/tokens';
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useFocusEffect, useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Image,
-  Modal,
   Pressable,
   ScrollView,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +38,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export const options = { headerShown: false };
 
 const SEARCH_DEBOUNCE_MS = 300;
+const GUTTER = space.lg;
+const CARD_GAP = space.md;
+const FAB_SIZE = 56;
+
+const QUICK_FILTERS: { label: string; filter: LibraryFilter }[] = [
+  { label: 'Cooked', filter: { type: 'recently_cooked' } },
+  { label: 'Favorites', filter: { type: 'favorite' } },
+  { label: 'Want to cook', filter: { type: 'want_to_cook' } },
+  { label: 'Never cooked', filter: { type: 'never_cooked' } },
+  { label: 'Archived', filter: { type: 'archived' } },
+];
+
+const SORT_OPTIONS: [LibrarySort, string][] = [
+  ['recent_added', 'Recently added'],
+  ['recent_cooked', 'Recently cooked'],
+  ['most_cooked', 'Most cooked'],
+  ['title', 'A-Z'],
+];
 
 /**
  * Builds the single spoken description for a recipe card. Without this a screen
@@ -44,8 +71,16 @@ function describeRecipeCard(item: RecipeListItem): string {
   return parts.join(', ');
 }
 
+/** Tapping the chip for the filter already applied clears it, so identity matters. */
+function isSameFilter(a: LibraryFilter, b: LibraryFilter): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'tag' && b.type === 'tag') return a.tag === b.tag;
+  if (a.type === 'cuisine' && b.type === 'cuisine') return a.cuisine === b.cuisine;
+  return true;
+}
+
 export default function LibraryScreen() {
-  const { colors } = useTheme();
+  const { colors, resolved } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
@@ -117,6 +152,10 @@ export default function LibraryScreen() {
     [router]
   );
 
+  const toggleFilter = useCallback((next: LibraryFilter) => {
+    setFilter((current) => (isSameFilter(current, next) ? { type: 'none' } : next));
+  }, []);
+
   const renderCard = useCallback(
     ({ item }: { item: RecipeListItem }) => (
       <RecipeCard item={item} grid={grid} colors={colors} onPress={openRecipe} />
@@ -124,9 +163,17 @@ export default function LibraryScreen() {
     [grid, colors, openRecipe]
   );
 
+  // Memoised so the FlatList is not handed a fresh style object — and forced to
+  // re-measure its content — on every keystroke.
+  const listContentStyle = useMemo(
+    () => ({
+      paddingHorizontal: grid ? 0 : GUTTER,
+      paddingBottom: insets.bottom + FAB_SIZE + space.xxxl,
+    }),
+    [grid, insets.bottom]
+  );
 
-  const hasActiveSearchOrFilter =
-    query.trim().length > 0 || filter.type !== 'none';
+  const hasActiveSearchOrFilter = query.trim().length > 0 || filter.type !== 'none';
 
   if (!onboardingChecked) {
     return (
@@ -144,184 +191,88 @@ export default function LibraryScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
-      <View style={{ paddingHorizontal: 18, paddingBottom: 4 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-          <Text
-            style={{
-              flex: 1,
-              fontFamily: 'Lora_700Bold',
-              fontSize: 30,
-              color: colors.textPrimary,
-            }}
-          >
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.background,
+        paddingTop: insets.top + space.sm,
+      }}
+    >
+      <View style={{ paddingHorizontal: GUTTER, gap: space.md }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Text variant="display" style={{ flex: 1 }}>
             Mise en
           </Text>
-          <Pressable
-            accessibilityRole="button"
+          <IconButton
+            icon="swap-vertical-outline"
             accessibilityLabel="Sort recipes"
             accessibilityHint="Opens sort options"
             onPress={() => setSortMenu(true)}
-            hitSlop={8}
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 17,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-              marginRight: 8,
-            }}
-          >
-            <Ionicons name="swap-vertical-outline" size={20} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
+          />
+          <IconButton
+            icon={grid ? 'grid-outline' : 'list-outline'}
             accessibilityLabel={grid ? 'Switch to list view' : 'Switch to grid view'}
             onPress={() => setGrid((g) => !g)}
-            hitSlop={8}
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 17,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-              marginRight: 8,
-            }}
-          >
-            <Ionicons name={grid ? 'grid' : 'list'} size={18} color={colors.textPrimary} />
-          </Pressable>
-          <Link href="/settings" asChild>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Settings"
-              hitSlop={8}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 17,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Ionicons name="settings-outline" size={24} color={colors.textPrimary} />
-            </Pressable>
-          </Link>
-        </View>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: colors.surface,
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingHorizontal: 12,
-          }}
-        >
-          <Ionicons name="search" size={19} color={colors.textSecondary} />
-          <TextInput
-            accessibilityLabel="Search recipes"
-            accessibilityHint="Supports filters such as has:chicken, no:nuts, is:favorite and mins<30"
-            placeholder='Search (e.g. has:chicken no:nuts is:favorite mins<30)'
-            placeholderTextColor={colors.textSecondary}
-            value={query}
-            onChangeText={setQuery}
-            onSubmitEditing={() => setDebouncedQuery(query)}
-            returnKeyType="search"
-            style={{
-              flex: 1,
-              paddingVertical: 11,
-              paddingHorizontal: 8,
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textPrimary,
-            }}
+          />
+          <IconButton
+            icon="settings-outline"
+            accessibilityLabel="Settings"
+            onPress={() => router.push('/settings')}
           />
         </View>
+
+        <TextField
+          accessibilityLabel="Search recipes"
+          accessibilityHint="Supports filters such as has:chicken, no:nuts, is:favorite and mins<30"
+          icon="search"
+          placeholder="Search (e.g. has:chicken no:nuts mins<30)"
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={() => setDebouncedQuery(query)}
+          returnKeyType="search"
+          trailing={
+            query.length > 0 ? (
+              <IconButton
+                icon="close-circle"
+                accessibilityLabel="Clear search"
+                variant="ghost"
+                size={28}
+                iconSize={18}
+                onPress={() => {
+                  setQuery('');
+                  setDebouncedQuery('');
+                }}
+              />
+            ) : undefined
+          }
+        />
       </View>
 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={{ maxHeight: 36, minHeight: 36 }}
+        style={{ flexGrow: 0 }}
         contentContainerStyle={{
-          paddingHorizontal: 14,
-          paddingBottom: 0,
-          paddingTop: 0,
-          gap: 8,
+          paddingHorizontal: GUTTER,
+          paddingVertical: space.md,
+          gap: space.sm,
           alignItems: 'center',
         }}
       >
-        <Chip
-          label="Cooked"
-          active={filter.type === 'recently_cooked'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'recently_cooked'
-                ? { type: 'none' }
-                : { type: 'recently_cooked' }
-            )
-          }
-        />
-        <Chip
-          label="Favorites"
-          active={filter.type === 'favorite'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
-            )
-          }
-        />
-        <Chip
-          label="Want to cook"
-          active={filter.type === 'want_to_cook'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'want_to_cook'
-                ? { type: 'none' }
-                : { type: 'want_to_cook' }
-            )
-          }
-        />
-        <Chip
-          label="Never cooked"
-          active={filter.type === 'never_cooked'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'never_cooked'
-                ? { type: 'none' }
-                : { type: 'never_cooked' }
-            )
-          }
-        />
-        <Chip
-          label="Archived"
-          active={filter.type === 'archived'}
-          colors={colors}
-          onPress={() =>
-            setFilter(
-              filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
-            )
-          }
-        />
+        {QUICK_FILTERS.map((f) => (
+          <Chip
+            key={f.filter.type}
+            label={f.label}
+            active={isSameFilter(filter, f.filter)}
+            onPress={() => toggleFilter(f.filter)}
+          />
+        ))}
         <Chip
           label="More"
+          icon="options-outline"
           accessibilityLabel="More filters"
           accessibilityHint="Opens tag and cuisine filters"
           active={filter.type === 'tag' || filter.type === 'cuisine'}
-          colors={colors}
           onPress={() => setFilterMenu(true)}
         />
       </ScrollView>
@@ -331,66 +282,36 @@ export default function LibraryScreen() {
         data={items}
         numColumns={grid ? 2 : 1}
         keyExtractor={(it) => it.id}
-        style={{ marginTop: 4, flex: 1 }}
-        columnWrapperStyle={grid ? { gap: 10, paddingHorizontal: 14 } : undefined}
-        contentContainerStyle={{
-          paddingHorizontal: grid ? 0 : 14,
-          paddingTop: 0,
-          paddingBottom: insets.bottom + 100,
-        }}
+        style={{ flex: 1 }}
+        columnWrapperStyle={grid ? { gap: CARD_GAP, paddingHorizontal: GUTTER } : undefined}
+        contentContainerStyle={listContentStyle}
         ListEmptyComponent={
-          <View style={{ padding: 34, alignItems: 'center' }}>
-            <Text
-              style={{
-                fontFamily: 'Lora_400Regular',
-                fontSize: 20,
-                color: colors.textSecondary,
-                textAlign: 'center',
-                marginBottom: 10,
-              }}
-            >
+          <View style={{ padding: space.xxxl, alignItems: 'center', gap: space.lg }}>
+            <Ionicons
+              name={hasActiveSearchOrFilter ? 'search-outline' : 'restaurant-outline'}
+              size={44}
+              color={colors.textSecondary}
+            />
+            <Text variant="heading" tone="secondary" style={{ textAlign: 'center' }}>
               {hasActiveSearchOrFilter ? 'No matching recipes' : 'No recipes yet'}
             </Text>
             {hasActiveSearchOrFilter ? (
-              <Pressable
-                accessibilityRole="button"
+              <Button
+                label="Clear filters"
+                variant="secondary"
                 accessibilityLabel="Clear search and filters"
                 onPress={() => {
                   setQuery('');
                   setDebouncedQuery('');
                   setFilter({ type: 'none' });
                 }}
-                style={{
-                  marginTop: 8,
-                  backgroundColor: colors.surface,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                }}
-              >
-                <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
-                  Clear filters
-                </Text>
-              </Pressable>
+              />
             ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add your first recipe"
+              <Button
+                label="Add your first recipe"
+                icon="add"
                 onPress={() => router.push('/import')}
-                style={{
-                  marginTop: 8,
-                  backgroundColor: colors.primary,
-                  borderRadius: 12,
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                }}
-              >
-                <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-                  Add your first recipe
-                </Text>
-              </Pressable>
+              />
             )}
           </View>
         }
@@ -401,201 +322,145 @@ export default function LibraryScreen() {
         accessibilityRole="button"
         accessibilityLabel="Add recipe"
         onPress={() => router.push('/import')}
-        style={{
-          position: 'absolute',
-          right: 22,
-          bottom: insets.bottom + 22,
-          width: 58,
-          height: 58,
-          borderRadius: 29,
-          backgroundColor: colors.primary,
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#000',
-          shadowOpacity: 0.22,
-          shadowRadius: 8,
-          elevation: 4,
-        }}
+        android_ripple={ripple(colors.rippleOnFill, true)}
+        style={({ pressed }) => [
+          {
+            position: 'absolute',
+            right: GUTTER + space.xs,
+            bottom: insets.bottom + space.xl,
+            width: FAB_SIZE,
+            height: FAB_SIZE,
+            borderRadius: radius.pill,
+            backgroundColor: colors.primaryFill,
+            alignItems: 'center',
+            justifyContent: 'center',
+            ...elevation(3, resolved),
+          },
+          pressedStyle(pressed, 0.9),
+        ]}
       >
-        <Ionicons name="add" size={28} color="#fff" />
+        <Ionicons name="add" size={28} color={colors.onPrimaryFill} />
       </Pressable>
 
-      <Modal
+      <ModalCard
         visible={sortMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSortMenu(false)}
+        onClose={() => setSortMenu(false)}
+        title="Sort by"
+        dismissLabel="Close sort menu"
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close sort menu"
-          style={{
-            flex: 1,
-            backgroundColor: '#0006',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-          onPress={() => setSortMenu(false)}
-        >
-          <View style={{ backgroundColor: colors.surface, borderRadius: 14, padding: 6 }}>
-            {(
-              [
-                ['recent_added', 'Recently added'],
-                ['recent_cooked', 'Recently cooked'],
-                ['most_cooked', 'Most cooked'],
-                ['title', 'A-Z'],
-              ] as const
-            ).map(([value, label]) => (
+        <View>
+          {SORT_OPTIONS.map(([value, label]) => {
+            const selected = sort === value;
+            return (
               <Pressable
                 key={value}
                 accessibilityRole="menuitem"
                 accessibilityLabel={`Sort by ${label}`}
-                accessibilityState={{ selected: sort === value }}
+                accessibilityState={{ selected }}
                 onPress={() => {
                   setSort(value);
                   setSortMenu(false);
                 }}
-                style={{ paddingHorizontal: 12, paddingVertical: 11 }}
+                android_ripple={ripple(colors.ripple)}
+                style={({ pressed }) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.md,
+                    minHeight: 48,
+                    paddingHorizontal: space.md,
+                    borderRadius: radius.sm,
+                    backgroundColor: selected ? colors.primarySoft : 'transparent',
+                  },
+                  pressedStyle(pressed),
+                ]}
               >
-                <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, fontSize: 14 }}>
+                <Ionicons
+                  name={selected ? 'radio-button-on' : 'radio-button-off'}
+                  size={18}
+                  color={selected ? colors.onPrimarySoft : colors.textSecondary}
+                />
+                <Text
+                  variant="body"
+                  tone={selected ? 'onAccentSoft' : 'primary'}
+                  style={{ flex: 1 }}
+                >
                   {label}
                 </Text>
               </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
-      <Modal
+            );
+          })}
+        </View>
+      </ModalCard>
+
+      <ModalCard
         visible={filterMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFilterMenu(false)}
+        onClose={() => setFilterMenu(false)}
+        title="More filters"
+        dismissLabel="Close filters"
+        footer={
+          <Button
+            label="Done"
+            variant="ghost"
+            accessibilityLabel="Done, close filters"
+            onPress={() => setFilterMenu(false)}
+            style={{ alignSelf: 'flex-end' }}
+          />
+        }
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close filters"
-          style={{
-            flex: 1,
-            backgroundColor: '#0006',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-          onPress={() => setFilterMenu(false)}
-        >
-          <Pressable
-            // See AppDialog: grouping would hide the filter chips inside.
-            accessible={false}
-            accessibilityViewIsModal
-            onPress={() => undefined}
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <View
             style={{
-              backgroundColor: colors.surface,
-              borderRadius: 14,
-              padding: 10,
-              borderWidth: 1,
-              borderColor: colors.border,
-              gap: 8,
-              maxHeight: '80%',
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              gap: space.sm,
+              paddingBottom: space.xs,
             }}
           >
-            <Text style={{ fontFamily: 'Lora_700Bold', color: colors.textPrimary, fontSize: 18 }}>
-              More filters
-            </Text>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <Chip
+              label="Favorites"
+              active={filter.type === 'favorite'}
+              onPress={() => toggleFilter({ type: 'favorite' })}
+            />
+            <Chip
+              label="Never cooked"
+              active={filter.type === 'never_cooked'}
+              onPress={() => toggleFilter({ type: 'never_cooked' })}
+            />
+            <Chip
+              label="Want to cook"
+              active={filter.type === 'want_to_cook'}
+              onPress={() => toggleFilter({ type: 'want_to_cook' })}
+            />
+            <Chip
+              label="Archived"
+              active={filter.type === 'archived'}
+              onPress={() => toggleFilter({ type: 'archived' })}
+            />
+            {tags.map((t) => (
               <Chip
-                label="Favorites"
-                active={filter.type === 'favorite'}
-                colors={colors}
-                onPress={() =>
-                  setFilter(
-                    filter.type === 'favorite' ? { type: 'none' } : { type: 'favorite' }
-                  )
-                }
+                key={`tag-${t}`}
+                label={`# ${t}`}
+                accessibilityLabel={`Tag ${t}`}
+                active={filter.type === 'tag' && filter.tag === t}
+                onPress={() => toggleFilter({ type: 'tag', tag: t })}
               />
+            ))}
+            {cuisines.map((c) => (
               <Chip
-                label="Never cooked"
-                active={filter.type === 'never_cooked'}
-                colors={colors}
-                onPress={() =>
-                  setFilter(
-                    filter.type === 'never_cooked'
-                      ? { type: 'none' }
-                      : { type: 'never_cooked' }
-                  )
-                }
+                key={`cuisine-${c}`}
+                label={c}
+                accessibilityLabel={`Cuisine ${c}`}
+                active={filter.type === 'cuisine' && filter.cuisine === c}
+                onPress={() => toggleFilter({ type: 'cuisine', cuisine: c })}
               />
-              <Chip
-                label="Want to cook"
-                active={filter.type === 'want_to_cook'}
-                colors={colors}
-                onPress={() =>
-                  setFilter(
-                    filter.type === 'want_to_cook'
-                      ? { type: 'none' }
-                      : { type: 'want_to_cook' }
-                  )
-                }
-              />
-              <Chip
-                label="Archived"
-                active={filter.type === 'archived'}
-                colors={colors}
-                onPress={() =>
-                  setFilter(
-                    filter.type === 'archived' ? { type: 'none' } : { type: 'archived' }
-                  )
-                }
-              />
-              {tags.map((t) => (
-                <Chip
-                  key={t}
-                  label={`# ${t}`}
-                  accessibilityLabel={`Tag ${t}`}
-                  active={filter.type === 'tag' && filter.tag === t}
-                  colors={colors}
-                  onPress={() =>
-                    setFilter(
-                      filter.type === 'tag' && filter.tag === t
-                        ? { type: 'none' }
-                        : { type: 'tag', tag: t }
-                    )
-                  }
-                />
-              ))}
-              {cuisines.map((c) => (
-                <Chip
-                  key={c}
-                  label={c}
-                  active={filter.type === 'cuisine' && filter.cuisine === c}
-                  colors={colors}
-                  onPress={() =>
-                    setFilter(
-                      filter.type === 'cuisine' && filter.cuisine === c
-                        ? { type: 'none' }
-                        : { type: 'cuisine', cuisine: c }
-                    )
-                  }
-                />
-              ))}
-            </ScrollView>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Done, close filters"
-              onPress={() => setFilterMenu(false)}
-              style={{
-                alignSelf: 'flex-end',
-                paddingHorizontal: 12,
-                paddingVertical: 7,
-              }}
-            >
-              <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>Done</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+            ))}
+          </View>
+        </ScrollView>
+      </ModalCard>
     </View>
   );
 }
-
 
 /**
  * Memoised so a keystroke in the search field re-renders the list shell
@@ -613,177 +478,107 @@ const RecipeCard = memo(function RecipeCard({
   onPress: (id: string) => void;
 }) {
   return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={describeRecipeCard(item)}
-        accessibilityHint="Opens the recipe"
-        onPress={() => onPress(item.id)}
-        style={({ pressed }) => ({
-          flex: grid ? 0.5 : 1,
-          marginBottom: 14,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
-        })}
+    <Card
+      level={1}
+      padded={false}
+      onPress={() => onPress(item.id)}
+      accessibilityLabel={describeRecipeCard(item)}
+      accessibilityHint="Opens the recipe"
+      style={{ flex: grid ? 0.5 : 1, marginBottom: CARD_GAP }}
+    >
+      {/* `aspectRatio` rather than a fixed height: a hard 170 stretched the
+          photo on wide screens and at large system font scales. */}
+      <View
+        style={{
+          aspectRatio: grid ? 1 : 16 / 10,
+          backgroundColor: colors.surfaceMuted,
+        }}
       >
+        {item.heroUri ? (
+          <Image
+            source={{ uri: item.heroUri }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons
+              name="restaurant-outline"
+              size={grid ? 36 : 44}
+              color={colors.textSecondary}
+            />
+          </View>
+        )}
+
+        <ImageScrim height={grid ? 84 : 104} />
+
         <View
           style={{
-            borderRadius: 18,
-            overflow: 'hidden',
-            backgroundColor: colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-            shadowColor: '#000',
-            shadowOpacity: 0.08,
-            shadowRadius: 12,
-            elevation: 2,
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            paddingHorizontal: space.md,
+            paddingBottom: space.md,
           }}
         >
-          <View style={{ height: grid ? 170 : 210, backgroundColor: colors.border }}>
-            {item.heroUri ? (
-              <Image
-                source={{ uri: item.heroUri }}
-                style={{ width: '100%', height: '100%' }}
-              />
-            ) : (
-              <View
-                style={{
-                  flex: 1,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
-              </View>
-            )}
-
-            <View
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                paddingHorizontal: 12,
-                paddingTop: 28,
-                paddingBottom: 10,
-                backgroundColor: '#00000066',
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily: 'Lora_700Bold',
-                  fontSize: 16,
-                  color: '#fff',
-                }}
-                numberOfLines={2}
-              >
-                {item.title || 'Untitled'}
-              </Text>
-            </View>
-            {(item.isFavorite || item.wantToCook) && (
-              <View
-                style={{
-                  position: 'absolute',
-                  right: 8,
-                  top: 8,
-                  flexDirection: 'row',
-                  gap: 6,
-                }}
-              >
-                {item.isFavorite ? (
-                  <View
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 12,
-                      backgroundColor: '#00000066',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Ionicons name="star" size={13} color="#FFD166" />
-                  </View>
-                ) : null}
-                {item.wantToCook ? (
-                  <View
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 12,
-                      backgroundColor: '#00000066',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Ionicons name="flame" size={13} color="#FF9F1C" />
-                  </View>
-                ) : null}
-              </View>
-            )}
-          </View>
-
-          <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
-            <Text
-              style={{
-                fontFamily: 'DMSans_400Regular',
-                color: colors.textSecondary,
-              }}
-              numberOfLines={1}
-            >
-              {item.cuisine ? `${item.cuisine} · ` : ''}
-              {item.cookCount} cooks
-            </Text>
-          </View>
+          <Text variant="subheading" tone="onImage" numberOfLines={2}>
+            {item.title || 'Untitled'}
+          </Text>
         </View>
-      </Pressable>
+
+        {item.isFavorite || item.wantToCook ? (
+          <View
+            style={{
+              position: 'absolute',
+              right: space.sm,
+              top: space.sm,
+              flexDirection: 'row',
+              gap: space.xs,
+            }}
+          >
+            {item.isFavorite ? (
+              <PhotoBadge icon="star" color={colors.star} bg={colors.imageChrome} />
+            ) : null}
+            {item.wantToCook ? (
+              <PhotoBadge icon="flame" color={colors.flame} bg={colors.imageChrome} />
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+
+      <View style={{ paddingHorizontal: space.md, paddingVertical: space.sm }}>
+        <Text variant="caption" tone="secondary" numberOfLines={1}>
+          {item.cuisine ? `${item.cuisine} · ` : ''}
+          {item.cookCount === 1 ? '1 cook' : `${item.cookCount} cooks`}
+        </Text>
+      </View>
+    </Card>
   );
 });
 
-function Chip({
-  label,
-  active,
-  onPress,
-  colors,
-  accessibilityLabel,
-  accessibilityHint,
+/** Status marker floating on a recipe photo. */
+function PhotoBadge({
+  icon,
+  color,
+  bg,
 }: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  colors: ThemeColors;
-  accessibilityLabel?: string;
-  accessibilityHint?: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  bg: string;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ selected: active }}
-      accessibilityHint={
-        accessibilityHint ?? (active ? 'Removes this filter' : 'Applies this filter')
-      }
-      onPress={onPress}
+    <View
       style={{
-        paddingHorizontal: 14,
-        paddingVertical: 5,
-        minHeight: 30,
-        borderRadius: 999,
-        backgroundColor: active ? colors.primary + '22' : colors.surface,
-        borderWidth: 1,
-        borderColor: active ? colors.primary : colors.border,
-        alignSelf: 'flex-start',
+        width: 26,
+        height: 26,
+        borderRadius: radius.pill,
+        backgroundColor: bg,
+        alignItems: 'center',
         justifyContent: 'center',
       }}
     >
-      <Text
-        style={{
-          fontFamily: 'DMSans_500Medium',
-          fontSize: 13,
-          lineHeight: 16,
-          color: active ? colors.primary : colors.textPrimary,
-        }}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-    </Pressable>
+      <Ionicons name={icon} size={14} color={color} />
+    </View>
   );
 }

@@ -1,15 +1,24 @@
+import { AppDialog } from '@/components/AppDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  Button,
+  Chip,
+  IconButton,
+  Screen,
+  SwitchRow,
+  Text,
+  TextField,
+} from '@/components/ui';
+import { pressedStyle, ripple } from '@/components/ui/press';
 import {
   createManualRecipeDraft,
   getRecipeById,
   saveRecipe,
 } from '@/data/recipes';
-import { AppDialog } from '@/components/AppDialog';
-import { BackButton } from '@/components/BackButton';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { formatQuantity, isIngredientSectionHeading } from '@/domain/scaling';
-import { importFromManualText } from '@/lib/import/pipeline';
+import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { newId } from '@/lib/id';
+import { importFromManualText } from '@/lib/import/pipeline';
 import { restoreImportDraft, takeImportDraft } from '@/lib/importDraftStore';
 import { getSeenStepDragHint, setSeenStepDragHint } from '@/lib/secrets';
 import {
@@ -17,27 +26,24 @@ import {
   KEYBOARD_VERTICAL_OFFSET,
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
-import type { Ingredient, Recipe, Step } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
+import { radius, space, typeScale } from '@/theme/tokens';
+import type { Ingredient, Recipe, Step } from '@/types/recipe';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   BackHandler,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
-  Switch,
-  Text,
   TextInput,
   View,
 } from 'react-native';
-import {
+import DraggableFlatList, {
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
-import DraggableFlatList from 'react-native-draggable-flatlist';
 
 const COMMON_INGREDIENT_UNITS: { label: string; value: string | null }[] = [
   { label: 'tsp', value: 'tsp' },
@@ -286,274 +292,298 @@ export default function RecipeFormScreen() {
     if (activeStepId === id) setActiveStepId(null);
   };
 
+  const runAiParse = async () => {
+    const text = rawPasteText.trim();
+    if (!text) {
+      setDialog({
+        title: 'Nothing to parse',
+        message: 'Paste some recipe text first.',
+      });
+      return;
+    }
+    const state = await NetInfo.fetch();
+    if (!state.isConnected) {
+      setDialog({
+        title: 'Offline',
+        message: 'Connect to Wi-Fi to use AI parsing.',
+      });
+      return;
+    }
+    const credentials = await getAiCredentials();
+    if (!credentials.ok) {
+      setDialog(describeAiUnavailable(credentials.reason, credentials.provider));
+      return;
+    }
+    setParseBusy(true);
+    try {
+      const extracted = await importFromManualText(
+        text,
+        credentials.provider,
+        credentials.apiKey,
+        'manual'
+      );
+      setRecipe((r) => (r ? mergeAiExtractIntoDraft(r, extracted) : r));
+      setRawPasteText('');
+      setShowIngredients(true);
+      setShowSteps(true);
+      setActiveIngredientId(null);
+      setActiveStepId(null);
+    } catch (e) {
+      setDialog({
+        title: 'Parse failed',
+        message: e instanceof Error ? e.message : 'Unknown error',
+      });
+    } finally {
+      setParseBusy(false);
+    }
+  };
+
+  const save = async () => {
+    // saveRecipe opens its own transaction, and SQLite has no nested
+    // transactions — a second tap mid-save fails the whole write.
+    if (isSaving) return;
+    const nextErrors = validateRecipeDraft(recipe);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setDialog({
+        title: 'Fix required fields',
+        message: 'Please fix the highlighted fields before saving.',
+      });
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await saveRecipe(recipe);
+      setBaseline(JSON.stringify(recipe));
+      if (!recipeId && startedFromImport) {
+        router.replace({
+          pathname: '/recipe/[id]',
+          params: { id: recipe.id, fromImport: '1' },
+        });
+        return;
+      }
+      router.replace(`/recipe/${recipe.id}`);
+    } catch (e) {
+      setDialog({
+        title: 'Save failed',
+        message: e instanceof Error ? e.message : 'Unknown error while saving recipe.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Compact inline field used inside the ingredient editor rows. */
+  const inlineInputStyle = {
+    ...typeScale.body,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    minHeight: 44,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+  } as const;
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={KEYBOARD_AVOIDING_BEHAVIOR}
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton onPress={requestLeave} />
-      <ScrollView
-        ref={scrollRef}
-        keyboardShouldPersistTaps="handled"
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 14, paddingBottom: 48 }}
-      >
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        {recipeId ? 'Edit recipe' : 'New recipe'}
-      </Text>
-      <LabeledInput
-        label="Title"
-        value={recipe.title}
-        onChange={(t) => {
-          setRecipe({ ...recipe, title: t });
-          if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
+      <Screen
+        scroll
+        scrollRef={scrollRef}
+        header={{
+          title: recipeId ? 'Edit recipe' : 'New recipe',
+          back: true,
+          onBack: requestLeave,
         }}
-        colors={colors}
-        onFocus={scrollFocusedInputIntoView}
-      />
-      {errors.title ? (
-        <Text style={{ color: colors.destructive, fontFamily: 'DMSans_400Regular', marginTop: -8 }}>
-          {errors.title}
-        </Text>
-      ) : null}
-      <LabeledInput
-        label="Base servings"
-        value={baseServingsInput ?? String(recipe.baseServings)}
-        keyboard="decimal-pad"
-        onChange={(t) => {
-          setBaseServingsInput(t);
-          const parsed = Number(t);
-          if (!Number.isFinite(parsed) || parsed <= 0) return;
-          setRecipe({ ...recipe, baseServings: parsed });
-        }}
-        onBlur={() => {
-          if (baseServingsInput === null) return;
-          const parsed = Number(baseServingsInput);
-          setRecipe({
-            ...recipe,
-            baseServings: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
-          });
-          setBaseServingsInput(null);
-        }}
-        colors={colors}
-        onFocus={scrollFocusedInputIntoView}
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Advanced options"
-        accessibilityState={{ expanded: showAdvanced }}
-        onPress={() => setShowAdvanced((v) => !v)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+        gap={space.lg}
+        footer={
+          <Button
+            label={isSaving ? 'Saving…' : 'Save'}
+            size="lg"
+            fullWidth
+            icon="checkmark"
+            loading={isSaving}
+            disabled={isSaving}
+            accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe'}
+            onPress={save}
+          />
+        }
       >
-        <Ionicons
-          name={showAdvanced ? 'chevron-down' : 'chevron-forward'}
-          size={16}
-          color={colors.textSecondary}
-        />
-        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
-          More options
-        </Text>
-      </Pressable>
-      {showAdvanced ? (
-        <>
-          <LabeledInput
-            label="Source URL"
-            value={recipe.sourceUrl}
-            onChange={(t) => setRecipe({ ...recipe, sourceUrl: t })}
-            colors={colors}
-            onFocus={scrollFocusedInputIntoView}
-          />
-          <LabeledInput
-            label="Cuisine"
-            value={recipe.cuisine ?? ''}
-            onChange={(t) => setRecipe({ ...recipe, cuisine: t || undefined })}
-            colors={colors}
-            onFocus={scrollFocusedInputIntoView}
-          />
-          <LabeledInput
-            label="Main image URI (optional)"
-            value={recipe.mainImageUri ?? ''}
-            onChange={(t) =>
-              setRecipe({ ...recipe, mainImageUri: t.trim() ? t.trim() : undefined })
-            }
-            colors={colors}
-            onFocus={scrollFocusedInputIntoView}
-          />
-        </>
-      ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Paste and parse with AI"
-        accessibilityState={{ expanded: showPasteAi }}
-        onPress={() => setShowPasteAi((v) => !v)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-      >
-        <Ionicons
-          name={showPasteAi ? 'chevron-down' : 'chevron-forward'}
-          size={16}
-          color={colors.textSecondary}
-        />
-        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
-          Paste raw recipe (AI)
-        </Text>
-      </Pressable>
-      {showPasteAi ? (
-        <>
-          <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-            Paste ingredients and instructions in one block; we will split them into ingredients and steps.
-          </Text>
-          <TextInput
-            accessibilityLabel="Recipe text to parse"
-            multiline
-            value={rawPasteText}
-            onChangeText={setRawPasteText}
-            onFocus={scrollFocusedInputIntoView}
-            placeholder="Paste anything: blog text, notes, a caption…"
-            placeholderTextColor={colors.textSecondary}
-            style={{
-              minHeight: 140,
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 12,
-              padding: 12,
-              textAlignVertical: 'top',
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textPrimary,
-              backgroundColor: colors.surface,
-            }}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={parseBusy ? 'Parsing recipe text' : 'Parse pasted text'}
-            accessibilityState={{ disabled: parseBusy, busy: parseBusy }}
-            disabled={parseBusy}
-            onPress={async () => {
-              const text = rawPasteText.trim();
-              if (!text) {
-                setDialog({
-                  title: 'Nothing to parse',
-                  message: 'Paste some recipe text first.',
-                });
-                return;
-              }
-              const state = await NetInfo.fetch();
-              if (!state.isConnected) {
-                setDialog({
-                  title: 'Offline',
-                  message: 'Connect to Wi-Fi to use AI parsing.',
-                });
-                return;
-              }
-              const credentials = await getAiCredentials();
-              if (!credentials.ok) {
-                setDialog(
-                  describeAiUnavailable(credentials.reason, credentials.provider)
-                );
-                return;
-              }
-              setParseBusy(true);
-              try {
-                const extracted = await importFromManualText(
-                  text,
-                  credentials.provider,
-                  credentials.apiKey,
-                  'manual'
-                );
-                setRecipe((r) =>
-                  r ? mergeAiExtractIntoDraft(r, extracted) : r
-                );
-                setRawPasteText('');
-                setShowIngredients(true);
-                setShowSteps(true);
-                setActiveIngredientId(null);
-                setActiveStepId(null);
-              } catch (e) {
-                setDialog({
-                  title: 'Parse failed',
-                  message: e instanceof Error ? e.message : 'Unknown error',
-                });
-              } finally {
-                setParseBusy(false);
-              }
-            }}
-            style={{
-              backgroundColor: colors.primary,
-              padding: 16,
-              borderRadius: 14,
-              alignItems: 'center',
-              opacity: parseBusy ? 0.6 : 1,
-            }}
-          >
-            {parseBusy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-                Parse with AI
-              </Text>
-            )}
-          </Pressable>
-        </>
-      ) : null}
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Ingredients section"
-          accessibilityState={{ expanded: showIngredients }}
-          onPress={() => setShowIngredients((v) => !v)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-        >
-          <Ionicons
-            name={showIngredients ? 'chevron-down' : 'chevron-forward'}
-            size={16}
-            color={colors.textPrimary}
-          />
-          <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>Ingredients</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={addIngredient}>
-          <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Add</Text>
-        </Pressable>
-      </View>
-      {showIngredients
-        ? recipe.ingredients.map((ing, idx) => (
-        <View
-          key={ing.id}
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 12,
-            padding: 10,
-            gap: 8,
-            backgroundColor: colors.surface,
+        <TextField
+          label="Title"
+          accessibilityLabel="Title"
+          value={recipe.title}
+          error={errors.title}
+          onChangeText={(t) => {
+            setRecipe({ ...recipe, title: t });
+            if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
           }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Edit ingredient ${ing.name || 'untitled'}`}
-            onPress={() => {
-              setActiveIngredientId(ing.id);
-              if (showUnitPickerForIngredientId && showUnitPickerForIngredientId !== ing.id) {
-                setShowUnitPickerForIngredientId(null);
+          onFocus={scrollFocusedInputIntoView}
+        />
+        <TextField
+          label="Base servings"
+          accessibilityLabel="Base servings"
+          value={baseServingsInput ?? String(recipe.baseServings)}
+          keyboardType="decimal-pad"
+          onChangeText={(t) => {
+            setBaseServingsInput(t);
+            const parsed = Number(t);
+            if (!Number.isFinite(parsed) || parsed <= 0) return;
+            setRecipe({ ...recipe, baseServings: parsed });
+          }}
+          onBlur={() => {
+            if (baseServingsInput === null) return;
+            const parsed = Number(baseServingsInput);
+            setRecipe({
+              ...recipe,
+              baseServings: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
+            });
+            setBaseServingsInput(null);
+          }}
+          onFocus={scrollFocusedInputIntoView}
+        />
+
+        <Disclosure
+          label="More options"
+          accessibilityLabel="Advanced options"
+          open={showAdvanced}
+          onToggle={() => setShowAdvanced((v) => !v)}
+        />
+        {showAdvanced ? (
+          <>
+            <TextField
+              label="Source URL"
+              accessibilityLabel="Source URL"
+              value={recipe.sourceUrl}
+              autoCapitalize="none"
+              keyboardType="url"
+              onChangeText={(t) => setRecipe({ ...recipe, sourceUrl: t })}
+              onFocus={scrollFocusedInputIntoView}
+            />
+            <TextField
+              label="Cuisine"
+              accessibilityLabel="Cuisine"
+              value={recipe.cuisine ?? ''}
+              onChangeText={(t) => setRecipe({ ...recipe, cuisine: t || undefined })}
+              onFocus={scrollFocusedInputIntoView}
+            />
+            <TextField
+              label="Main image URI"
+              hint="Optional"
+              accessibilityLabel="Main image URI, optional"
+              value={recipe.mainImageUri ?? ''}
+              autoCapitalize="none"
+              onChangeText={(t) =>
+                setRecipe({ ...recipe, mainImageUri: t.trim() ? t.trim() : undefined })
               }
-            }}
-          >
-            <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
-              {formatIngredientPreview(ing)}
-            </Text>
-          </Pressable>
-          {activeIngredientId === ing.id ? (
-            <>
-              {(() => {
-                const isSectionHeading = isIngredientSectionHeading(ing);
-                return (
-                  <>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                        Section heading (no amount or unit)
-                      </Text>
-                      <Switch
+              onFocus={scrollFocusedInputIntoView}
+            />
+          </>
+        ) : null}
+
+        <Disclosure
+          label="Paste raw recipe (AI)"
+          accessibilityLabel="Paste and parse with AI"
+          open={showPasteAi}
+          onToggle={() => setShowPasteAi((v) => !v)}
+        />
+        {showPasteAi ? (
+          <>
+            <TextField
+              accessibilityLabel="Recipe text to parse"
+              hint="Paste ingredients and instructions in one block; we will split them into ingredients and steps."
+              multiline
+              value={rawPasteText}
+              onChangeText={setRawPasteText}
+              onFocus={scrollFocusedInputIntoView}
+              placeholder="Paste anything: blog text, notes, a caption…"
+            />
+            <Button
+              label="Parse with AI"
+              icon="sparkles-outline"
+              fullWidth
+              loading={parseBusy}
+              disabled={parseBusy}
+              accessibilityLabel={parseBusy ? 'Parsing recipe text' : 'Parse pasted text'}
+              onPress={runAiParse}
+            />
+          </>
+        ) : null}
+
+        <SectionHeader
+          label="Ingredients"
+          count={recipe.ingredients.length}
+          open={showIngredients}
+          onToggle={() => setShowIngredients((v) => !v)}
+          onAdd={addIngredient}
+          addLabel="Add ingredient"
+          accessibilityLabel="Ingredients section"
+        />
+
+        {showIngredients
+          ? recipe.ingredients.map((ing, idx) => {
+              const isActive = activeIngredientId === ing.id;
+              const isSectionHeading = isIngredientSectionHeading(ing);
+              return (
+                <View
+                  key={ing.id}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: isActive ? colors.primary : colors.border,
+                    borderRadius: radius.md,
+                    padding: space.md,
+                    gap: space.md,
+                    backgroundColor: colors.surface,
+                  }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ingredient ${ing.name || 'untitled'}`}
+                    accessibilityState={{ expanded: isActive }}
+                    onPress={() => {
+                      setActiveIngredientId(isActive ? null : ing.id);
+                      if (
+                        showUnitPickerForIngredientId &&
+                        showUnitPickerForIngredientId !== ing.id
+                      ) {
+                        setShowUnitPickerForIngredientId(null);
+                      }
+                    }}
+                    android_ripple={ripple(colors.ripple)}
+                    style={({ pressed }) => [
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: space.sm,
+                        minHeight: 32,
+                      },
+                      pressedStyle(pressed),
+                    ]}
+                  >
+                    <Text
+                      variant={isSectionHeading ? 'bodyStrong' : 'body'}
+                      tone={isSectionHeading ? 'accent' : 'primary'}
+                      style={{ flex: 1 }}
+                    >
+                      {formatIngredientPreview(ing)}
+                    </Text>
+                    <Ionicons
+                      name={isActive ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                  </Pressable>
+
+                  {isActive ? (
+                    <>
+                      <SwitchRow
+                        label="Section heading"
+                        description="No amount or unit"
                         value={isSectionHeading}
                         onValueChange={(asHeading) => {
                           const next = [...recipe.ingredients];
@@ -584,13 +614,11 @@ export default function RecipeFormScreen() {
                           });
                         }}
                       />
-                    </View>
-                    {!isSectionHeading ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                          To taste (no amount or unit)
-                        </Text>
-                        <Switch
+
+                      {!isSectionHeading ? (
+                        <SwitchRow
+                          label="To taste"
+                          description="No amount or unit"
                           value={ing.amountMode === 'to_taste'}
                           onValueChange={(toTaste) => {
                             const next = [...recipe.ingredients];
@@ -613,107 +641,119 @@ export default function RecipeFormScreen() {
                             });
                           }}
                         />
-                      </View>
-                    ) : null}
-                    {isSectionHeading ? (
-                      <TextInput
-                        accessibilityLabel="Section heading"
-                        value={ing.name}
-                        onChangeText={(t) => {
-                          const next = [...recipe.ingredients];
-                          next[idx] = { ...ing, name: t };
-                          setRecipe({ ...recipe, ingredients: next });
-                        }}
-                        onFocus={scrollFocusedInputIntoView}
-                        placeholder="Section title"
-                        placeholderTextColor={colors.textSecondary}
-                        style={{
-                          flex: 1,
-                          borderWidth: 1,
-                          borderColor: colors.border,
-                          borderRadius: 8,
-                          padding: 8,
-                          color: colors.textPrimary,
-                        }}
-                      />
-                    ) : ing.amountMode === 'exact' ? (
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                      ) : null}
+
+                      {isSectionHeading ? (
                         <TextInput
-                          accessibilityLabel="Ingredient quantity"
-                          value={ingredientQuantityInputs[ing.id] ?? String(ing.quantity)}
+                          accessibilityLabel="Section heading"
+                          value={ing.name}
                           onChangeText={(t) => {
-                            setIngredientQuantityInputs((prev) => ({ ...prev, [ing.id]: t }));
-                            const parsed = parseQuantityInput(t);
-                            if (parsed === null) return;
                             const next = [...recipe.ingredients];
-                            next[idx] = {
-                              ...ing,
-                              quantity: parsed,
-                              unit: getAutoAdjustedIngredientUnit(ing.unit, parsed),
-                            };
+                            next[idx] = { ...ing, name: t };
                             setRecipe({ ...recipe, ingredients: next });
-                          }}
-                          onBlur={() => {
-                            const raw = ingredientQuantityInputs[ing.id];
-                            if (raw === undefined) return;
-                            const parsed = parseQuantityInput(raw);
-                            const next = [...recipe.ingredients];
-                            next[idx] = {
-                              ...ing,
-                              quantity: parsed ?? 0,
-                              unit:
-                                parsed === null
-                                  ? ing.unit
-                                  : getAutoAdjustedIngredientUnit(ing.unit, parsed),
-                            };
-                            setRecipe({ ...recipe, ingredients: next });
-                            setIngredientQuantityInputs((prev) => {
-                              const updated = { ...prev };
-                              delete updated[ing.id];
-                              return updated;
-                            });
                           }}
                           onFocus={scrollFocusedInputIntoView}
-                          keyboardType="decimal-pad"
-                          placeholder="Qty"
+                          placeholder="Section title"
                           placeholderTextColor={colors.textSecondary}
-                          style={{
-                            width: 64,
-                            borderWidth: 1,
-                            borderColor: colors.border,
-                            borderRadius: 8,
-                            padding: 8,
-                            color: colors.textPrimary,
-                          }}
+                          style={inlineInputStyle}
                         />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Unit: ${ing.unit ?? 'none'}`}
-                          accessibilityHint="Opens the unit picker"
-                          onPress={() =>
-                            setShowUnitPickerForIngredientId((current) =>
-                              current === ing.id ? null : ing.id
-                            )
-                          }
-                          style={{
-                            minWidth: 72,
-                            borderWidth: 1,
-                            borderColor: colors.border,
-                            borderRadius: 8,
-                            padding: 8,
-                            justifyContent: 'center',
-                            backgroundColor: colors.surface,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: ing.unit ? colors.textPrimary : colors.textSecondary,
-                              fontFamily: 'DMSans_400Regular',
+                      ) : ing.amountMode === 'exact' ? (
+                        <View style={{ flexDirection: 'row', gap: space.sm }}>
+                          <TextInput
+                            accessibilityLabel="Ingredient quantity"
+                            value={ingredientQuantityInputs[ing.id] ?? String(ing.quantity)}
+                            onChangeText={(t) => {
+                              setIngredientQuantityInputs((prev) => ({ ...prev, [ing.id]: t }));
+                              const parsed = parseQuantityInput(t);
+                              if (parsed === null) return;
+                              const next = [...recipe.ingredients];
+                              next[idx] = {
+                                ...ing,
+                                quantity: parsed,
+                                unit: getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                              };
+                              setRecipe({ ...recipe, ingredients: next });
                             }}
+                            onBlur={() => {
+                              const raw = ingredientQuantityInputs[ing.id];
+                              if (raw === undefined) return;
+                              const parsed = parseQuantityInput(raw);
+                              const next = [...recipe.ingredients];
+                              next[idx] = {
+                                ...ing,
+                                quantity: parsed ?? 0,
+                                unit:
+                                  parsed === null
+                                    ? ing.unit
+                                    : getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                              };
+                              setRecipe({ ...recipe, ingredients: next });
+                              setIngredientQuantityInputs((prev) => {
+                                const updated = { ...prev };
+                                delete updated[ing.id];
+                                return updated;
+                              });
+                            }}
+                            onFocus={scrollFocusedInputIntoView}
+                            keyboardType="decimal-pad"
+                            placeholder="Qty"
+                            placeholderTextColor={colors.textSecondary}
+                            style={[inlineInputStyle, { width: 72, textAlign: 'center' }]}
+                          />
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Unit: ${ing.unit ?? 'none'}`}
+                            accessibilityHint="Opens the unit picker"
+                            accessibilityState={{
+                              expanded: showUnitPickerForIngredientId === ing.id,
+                            }}
+                            onPress={() =>
+                              setShowUnitPickerForIngredientId((current) =>
+                                current === ing.id ? null : ing.id
+                              )
+                            }
+                            android_ripple={ripple(colors.ripple)}
+                            style={({ pressed }) => [
+                              inlineInputStyle,
+                              {
+                                minWidth: 84,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: space.xs,
+                                overflow: 'hidden',
+                              },
+                              pressedStyle(pressed),
+                            ]}
                           >
-                            {ing.unit ?? 'Unit'}
-                          </Text>
-                        </Pressable>
+                            <Text
+                              variant="body"
+                              tone={ing.unit ? 'primary' : 'secondary'}
+                              numberOfLines={1}
+                            >
+                              {ing.unit ?? 'Unit'}
+                            </Text>
+                            <Ionicons
+                              name="chevron-down"
+                              size={14}
+                              color={colors.textSecondary}
+                            />
+                          </Pressable>
+                          <TextInput
+                            accessibilityLabel="Ingredient name"
+                            value={ing.name}
+                            onChangeText={(t) => {
+                              const next = [...recipe.ingredients];
+                              next[idx] = { ...ing, name: t };
+                              setRecipe({ ...recipe, ingredients: next });
+                            }}
+                            onFocus={scrollFocusedInputIntoView}
+                            placeholder="Ingredient"
+                            placeholderTextColor={colors.textSecondary}
+                            style={[inlineInputStyle, { flex: 1 }]}
+                          />
+                        </View>
+                      ) : (
                         <TextInput
                           accessibilityLabel="Ingredient name"
                           value={ing.name}
@@ -725,82 +765,37 @@ export default function RecipeFormScreen() {
                           onFocus={scrollFocusedInputIntoView}
                           placeholder="Ingredient"
                           placeholderTextColor={colors.textSecondary}
-                          style={{
-                            flex: 1,
-                            borderWidth: 1,
-                            borderColor: colors.border,
-                            borderRadius: 8,
-                            padding: 8,
-                            color: colors.textPrimary,
-                          }}
+                          style={inlineInputStyle}
                         />
-                      </View>
-                    ) : (
-                      <TextInput
-                        accessibilityLabel="Ingredient name"
-                        value={ing.name}
-                        onChangeText={(t) => {
-                          const next = [...recipe.ingredients];
-                          next[idx] = { ...ing, name: t };
-                          setRecipe({ ...recipe, ingredients: next });
-                        }}
-                        onFocus={scrollFocusedInputIntoView}
-                        placeholder="Ingredient"
-                        placeholderTextColor={colors.textSecondary}
-                        style={{
-                          flex: 1,
-                          borderWidth: 1,
-                          borderColor: colors.border,
-                          borderRadius: 8,
-                          padding: 8,
-                          color: colors.textPrimary,
-                        }}
-                      />
-                    )}
-                    {ing.amountMode === 'exact' && !isSectionHeading && showUnitPickerForIngredientId === ing.id ? (
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                        {COMMON_INGREDIENT_UNITS.map((option) => {
-                          const selected = (ing.unit ?? null) === option.value;
-                          return (
-                            <Pressable
+                      )}
+
+                      {ing.amountMode === 'exact' &&
+                      !isSectionHeading &&
+                      showUnitPickerForIngredientId === ing.id ? (
+                        <View
+                          style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}
+                        >
+                          {COMMON_INGREDIENT_UNITS.map((option) => (
+                            <Chip
                               key={option.label}
-                              accessibilityRole="button"
+                              label={option.label}
+                              active={(ing.unit ?? null) === option.value}
                               accessibilityLabel={`Use unit ${option.label}`}
-                              accessibilityState={{ selected: ing.unit === option.value }}
+                              accessibilityHint="Sets this ingredient's unit"
                               onPress={() => {
                                 const next = [...recipe.ingredients];
                                 next[idx] = { ...ing, unit: option.value };
                                 setRecipe({ ...recipe, ingredients: next });
                                 setShowUnitPickerForIngredientId(null);
                               }}
-                              style={{
-                                paddingHorizontal: 10,
-                                paddingVertical: 7,
-                                borderRadius: 999,
-                                borderWidth: 1,
-                                borderColor: selected ? colors.primary : colors.border,
-                                backgroundColor: selected ? colors.primary + '22' : colors.surface,
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  fontFamily: selected ? 'DMSans_700Bold' : 'DMSans_500Medium',
-                                  color: selected ? colors.primary : colors.textPrimary,
-                                }}
-                              >
-                                {option.label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    ) : null}
-                    {ing.amountMode === 'exact' && !isSectionHeading ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-                          Scales with servings
-                        </Text>
-                        <Switch
+                            />
+                          ))}
+                        </View>
+                      ) : null}
+
+                      {ing.amountMode === 'exact' && !isSectionHeading ? (
+                        <SwitchRow
+                          label="Scales with servings"
                           value={ing.scalable}
                           onValueChange={(v) => {
                             const next = [...recipe.ingredients];
@@ -808,300 +803,325 @@ export default function RecipeFormScreen() {
                             setRecipe({ ...recipe, ingredients: next });
                           }}
                         />
+                      ) : null}
+
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Button
+                          label="Done"
+                          variant="ghost"
+                          accessibilityLabel="Done editing ingredient"
+                          onPress={() => {
+                            setActiveIngredientId(null);
+                            setShowUnitPickerForIngredientId(null);
+                          }}
+                        />
+                        <IconButton
+                          icon="trash-outline"
+                          variant="ghost"
+                          accessibilityLabel={`Remove ingredient ${ing.name || 'untitled'}`}
+                          onPress={() => removeIngredient(ing.id)}
+                          style={{ backgroundColor: colors.destructiveSoft }}
+                        />
                       </View>
-                    ) : null}
-                  </>
-                );
-              })()}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Done editing ingredient"
-                  onPress={() => {
-                    setActiveIngredientId(null);
-                    setShowUnitPickerForIngredientId(null);
-                  }}
-                >
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
-                    Done
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ingredient ${ing.name || 'untitled'}`}
-                  onPress={() => removeIngredient(ing.id)}
-                >
-                  <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
-                    Remove
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-        </View>
-      ))
-        : null}
-      {errors.ingredients ? (
-        <Text style={{ color: colors.destructive, fontFamily: 'DMSans_400Regular' }}>
-          {errors.ingredients}
-        </Text>
-      ) : null}
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Method section"
-          accessibilityState={{ expanded: showSteps }}
-          onPress={() => setShowSteps((v) => !v)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-        >
-          <Ionicons
-            name={showSteps ? 'chevron-down' : 'chevron-forward'}
-            size={16}
-            color={colors.textPrimary}
-          />
-          <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>Steps</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Add step" onPress={addStep}>
-          <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>Add</Text>
-        </Pressable>
-      </View>
-      {showStepDragHint ? (
-        <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }}>
-          Long press a step title and drag to reorder.
-        </Text>
-      ) : null}
-      {showSteps ? (
-      <DraggableFlatList
-        data={recipe.steps}
-        keyExtractor={(item) => item.id}
-        scrollEnabled={false}
-        activationDistance={10}
-        onDragBegin={async () => {
-          if (showStepDragHint) {
-            setShowStepDragHint(false);
-            await setSeenStepDragHint(true);
-          }
-        }}
-        onDragEnd={({ data }) => {
-          setRecipe({ ...recipe, steps: normalizeStepOrder(data) });
-        }}
-        renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Step>) => (
-          <View
-            style={{
-              marginBottom: 8,
-              opacity: isActive ? 0.8 : 1,
-            }}
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Step ${(getIndex() ?? 0) + 1}, drag handle`}
-              accessibilityHint="Long press and drag to reorder this step"
-              onLongPress={drag}
-              delayLongPress={180}
-              style={{ marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-            >
-              <Text style={{ color: colors.textSecondary }}>
-                Step {(getIndex() ?? 0) + 1}
-              </Text>
-            </Pressable>
-            {activeStepId === item.id ? (
-              <>
-                <TextInput
-                  accessibilityLabel="Step instruction"
-                  multiline
-                  value={item.instruction}
-                  onChangeText={(text) => updateStepInstruction(item.id, text)}
-                  onFocus={scrollFocusedInputIntoView}
-                  placeholder="Describe the step."
-                  placeholderTextColor={colors.textSecondary}
-                  style={{
-                    minHeight: 80,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    borderRadius: 12,
-                    padding: 10,
-                    textAlignVertical: 'top',
-                    fontFamily: 'DMSans_400Regular',
-                    color: colors.textPrimary,
-                    backgroundColor: colors.surface,
-                  }}
-                />
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Done editing step"
-                    onPress={() => setActiveStepId(null)}
-                  >
-                    <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>
-                      Done
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove this step"
-                    onPress={() => removeStep(item.id)}
-                  >
-                    <Text style={{ color: colors.destructive, fontFamily: 'DMSans_500Medium' }}>
-                      Remove
-                    </Text>
-                  </Pressable>
+                    </>
+                  ) : null}
                 </View>
-              </>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Edit step ${(getIndex() ?? 0) + 1}`}
-                onPress={() => setActiveStepId(item.id)}
-                style={{
-                  minHeight: 52,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  borderRadius: 12,
-                  padding: 10,
-                  justifyContent: 'center',
-                  backgroundColor: colors.surface,
-                }}
-              >
-                <Text
-                  style={{ color: colors.textPrimary, fontFamily: 'DMSans_400Regular' }}
-                  numberOfLines={2}
-                >
-                  {item.instruction || 'Tap to edit step'}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-      />
-      ) : null}
-      {errors.steps ? (
-        <Text style={{ color: colors.destructive, fontFamily: 'DMSans_400Regular' }}>
-          {errors.steps}
-        </Text>
-      ) : null}
+              );
+            })
+          : null}
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe'}
-          accessibilityState={{ disabled: isSaving, busy: isSaving }}
-          disabled={isSaving}
-          onPress={async () => {
-            // saveRecipe opens its own transaction, and SQLite has no nested
-            // transactions — a second tap mid-save fails the whole write.
-            if (isSaving) return;
-            const nextErrors = validateRecipeDraft(recipe);
-            setErrors(nextErrors);
-            if (Object.keys(nextErrors).length > 0) {
-              setDialog({
-                title: 'Fix required fields',
-                message: 'Please fix the highlighted fields before saving.',
-              });
-              return;
-            }
-            setIsSaving(true);
-            try {
-              await saveRecipe(recipe);
-              setBaseline(JSON.stringify(recipe));
-              if (!recipeId && startedFromImport) {
-                router.replace({
-                  pathname: '/recipe/[id]',
-                  params: { id: recipe.id, fromImport: '1' },
-                });
-                return;
-              }
-              router.replace(`/recipe/${recipe.id}`);
-            } catch (e) {
-              setDialog({
-                title: 'Save failed',
-                message: e instanceof Error ? e.message : 'Unknown error while saving recipe.',
-              });
-            } finally {
-              setIsSaving(false);
-            }
-          }}
-          style={{
-            backgroundColor: colors.primary,
-            padding: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            opacity: isSaving ? 0.6 : 1,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            {isSaving ? 'Saving…' : 'Save'}
+        {errors.ingredients ? (
+          <Text variant="caption" tone="destructive">
+            {errors.ingredients}
           </Text>
-        </Pressable>
-      </ScrollView>
-      <ConfirmDialog
-        visible={showDiscardConfirm}
-        destructive
-        title="Discard changes?"
-        message="Your edits to this recipe have not been saved."
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={() => {
-          setShowDiscardConfirm(false);
-          setBaseline(null);
-          leaveScreen();
-        }}
-        onCancel={() => setShowDiscardConfirm(false)}
-      />
-      <AppDialog
-        visible={dialog !== null}
-        title={dialog?.title ?? ''}
-        message={dialog?.message ?? ''}
-        actions={[
-          {
-            label: 'OK',
-            variant: 'primary',
-            onPress: () => dialog?.onOk?.(),
-          },
-        ]}
-        onClose={() => setDialog(null)}
-      />
-    </View>
+        ) : null}
+
+        <SectionHeader
+          label="Steps"
+          count={recipe.steps.length}
+          open={showSteps}
+          onToggle={() => setShowSteps((v) => !v)}
+          onAdd={addStep}
+          addLabel="Add step"
+          accessibilityLabel="Method section"
+        />
+
+        {showStepDragHint ? (
+          <Text variant="caption" tone="secondary">
+            Long press a step number and drag to reorder.
+          </Text>
+        ) : null}
+
+        {showSteps ? (
+          <DraggableFlatList
+            data={recipe.steps}
+            keyExtractor={(item) => item.id}
+            scrollEnabled={false}
+            activationDistance={10}
+            onDragBegin={async () => {
+              if (showStepDragHint) {
+                setShowStepDragHint(false);
+                await setSeenStepDragHint(true);
+              }
+            }}
+            onDragEnd={({ data }) => {
+              setRecipe({ ...recipe, steps: normalizeStepOrder(data) });
+            }}
+            renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Step>) => {
+              const number = (getIndex() ?? 0) + 1;
+              const editing = activeStepId === item.id;
+              return (
+                <View style={{ marginBottom: space.sm, opacity: isActive ? 0.85 : 1 }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Step ${number}, drag handle`}
+                    accessibilityHint="Long press and drag to reorder this step"
+                    onLongPress={drag}
+                    delayLongPress={180}
+                    style={({ pressed }) => [
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: space.sm,
+                        marginBottom: space.xs,
+                      },
+                      pressedStyle(pressed),
+                    ]}
+                  >
+                    <View
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: radius.pill,
+                        backgroundColor: colors.primarySoft,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text variant="overline" tone="onAccentSoft">
+                        {number}
+                      </Text>
+                    </View>
+                    <Ionicons name="reorder-two-outline" size={16} color={colors.textSecondary} />
+                  </Pressable>
+
+                  {editing ? (
+                    <>
+                      <TextInput
+                        accessibilityLabel="Step instruction"
+                        multiline
+                        value={item.instruction}
+                        onChangeText={(text) => updateStepInstruction(item.id, text)}
+                        onFocus={scrollFocusedInputIntoView}
+                        placeholder="Describe the step."
+                        placeholderTextColor={colors.textSecondary}
+                        style={[
+                          inlineInputStyle,
+                          {
+                            minHeight: 88,
+                            borderColor: colors.primary,
+                            textAlignVertical: 'top',
+                          },
+                        ]}
+                      />
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: space.xs,
+                        }}
+                      >
+                        <Button
+                          label="Done"
+                          variant="ghost"
+                          accessibilityLabel="Done editing step"
+                          onPress={() => setActiveStepId(null)}
+                        />
+                        <IconButton
+                          icon="trash-outline"
+                          variant="ghost"
+                          accessibilityLabel="Remove this step"
+                          onPress={() => removeStep(item.id)}
+                          style={{ backgroundColor: colors.destructiveSoft }}
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit step ${number}`}
+                      onPress={() => setActiveStepId(item.id)}
+                      android_ripple={ripple(colors.ripple)}
+                      style={({ pressed }) => [
+                        {
+                          minHeight: 52,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          borderRadius: radius.md,
+                          padding: space.md,
+                          justifyContent: 'center',
+                          backgroundColor: colors.surface,
+                          overflow: 'hidden',
+                        },
+                        pressedStyle(pressed),
+                      ]}
+                    >
+                      <Text
+                        variant="body"
+                        tone={item.instruction ? 'primary' : 'secondary'}
+                        numberOfLines={2}
+                      >
+                        {item.instruction || 'Tap to edit step'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            }}
+          />
+        ) : null}
+
+        {errors.steps ? (
+          <Text variant="caption" tone="destructive">
+            {errors.steps}
+          </Text>
+        ) : null}
+
+        <ConfirmDialog
+          visible={showDiscardConfirm}
+          destructive
+          title="Discard changes?"
+          message="Your edits to this recipe have not been saved."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          onConfirm={() => {
+            setShowDiscardConfirm(false);
+            setBaseline(null);
+            leaveScreen();
+          }}
+          onCancel={() => setShowDiscardConfirm(false)}
+        />
+        <AppDialog
+          visible={dialog !== null}
+          title={dialog?.title ?? ''}
+          message={dialog?.message ?? ''}
+          actions={[
+            {
+              label: 'OK',
+              variant: 'primary',
+              onPress: () => dialog?.onOk?.(),
+            },
+          ]}
+          onClose={() => setDialog(null)}
+        />
+      </Screen>
     </KeyboardAvoidingView>
   );
 }
 
-function LabeledInput({
+/** A quiet expand/collapse row for optional groups of fields. */
+function Disclosure({
   label,
-  value,
-  onChange,
-  onBlur,
-  colors,
-  keyboard = 'default',
-  onFocus,
+  open,
+  onToggle,
+  accessibilityLabel,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
-  onBlur?: () => void;
-  colors: ReturnType<typeof useTheme>['colors'];
-  keyboard?: 'default' | 'decimal-pad';
-  onFocus?: () => void;
+  open: boolean;
+  onToggle: () => void;
+  accessibilityLabel: string;
 }) {
+  const { colors } = useTheme();
   return (
-    <View>
-      <Text style={{ fontFamily: 'DMSans_500Medium', marginBottom: 6, color: colors.textPrimary }}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        keyboardType={keyboard}
-        onChangeText={onChange}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        style={{
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textPrimary,
-          backgroundColor: colors.surface,
-        }}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ expanded: open }}
+      onPress={onToggle}
+      style={({ pressed }) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          minHeight: 44,
+        },
+        pressedStyle(pressed),
+      ]}
+    >
+      <Ionicons
+        name={open ? 'chevron-down' : 'chevron-forward'}
+        size={16}
+        color={colors.textSecondary}
       />
+      <Text variant="label" tone="secondary">
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Collapsible group heading with an inline add button. */
+function SectionHeader({
+  label,
+  count,
+  open,
+  onToggle,
+  onAdd,
+  addLabel,
+  accessibilityLabel,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  onAdd: () => void;
+  addLabel: string;
+  accessibilityLabel: string;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: space.sm,
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ expanded: open }}
+        onPress={onToggle}
+        style={({ pressed }) => [
+          {
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: space.sm,
+            minHeight: 44,
+          },
+          pressedStyle(pressed),
+        ]}
+      >
+        <Ionicons
+          name={open ? 'chevron-down' : 'chevron-forward'}
+          size={16}
+          color={colors.textPrimary}
+        />
+        <Text variant="heading">{label}</Text>
+        <Text variant="caption" tone="secondary">
+          {count}
+        </Text>
+      </Pressable>
+      <Button label="Add" variant="ghost" icon="add" accessibilityLabel={addLabel} onPress={onAdd} />
     </View>
   );
 }

@@ -1,27 +1,20 @@
-import { saveRecipe } from '@/data/recipes';
 import { AppDialog } from '@/components/AppDialog';
-import { BackButton } from '@/components/BackButton';
-import { newId } from '@/lib/id';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Button, Screen, Text, TextField } from '@/components/ui';
+import { saveRecipe } from '@/data/recipes';
+import { newId } from '@/lib/id';
 import { takeImportDraft } from '@/lib/importDraftStore';
 import {
   KEYBOARD_AVOIDING_BEHAVIOR,
   KEYBOARD_VERTICAL_OFFSET,
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
-import type { Recipe } from '@/types/recipe';
 import { useTheme } from '@/theme/ThemeContext';
+import { space } from '@/theme/tokens';
+import type { Recipe } from '@/types/recipe';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  BackHandler,
-  KeyboardAvoidingView,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { BackHandler, KeyboardAvoidingView, ScrollView, View } from 'react-native';
 
 export default function ImportPreviewScreen() {
   const { colors } = useTheme();
@@ -46,6 +39,7 @@ export default function ImportPreviewScreen() {
     });
     return () => subscription.remove();
   }, []);
+
   const [ingredientText, setIngredientText] = useState(() =>
     (draft?.ingredients ?? [])
       .map(
@@ -61,7 +55,6 @@ export default function ImportPreviewScreen() {
   if (!draft) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <BackButton />
         <AppDialog
           visible
           title="Nothing to preview"
@@ -131,215 +124,140 @@ export default function ImportPreviewScreen() {
     return { ...draft, steps: next };
   };
 
+  const save = async () => {
+    // saveRecipe opens its own transaction, and SQLite has no nested
+    // transactions — a second tap mid-save fails the whole write.
+    if (isSaving) return;
+    setIsSaving(true);
+    const withIngredients = parseIngredientLines();
+    const withSteps = {
+      ...withIngredients,
+      steps: parseStepLines().steps,
+    };
+    setDraft(withSteps);
+    try {
+      await saveRecipe(withSteps);
+      router.replace(`/recipe/${withSteps.id}`);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Unknown error while saving.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={KEYBOARD_AVOIDING_BEHAVIOR}
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton onPress={() => setShowDiscardConfirm(true)} />
-      <ScrollView
-        ref={scrollRef}
-        keyboardShouldPersistTaps="handled"
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 12, paddingBottom: 40 }}
-      >
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Preview
-      </Text>
-      <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-        Review before saving. For deep edits, open manual form after save.
-      </Text>
-      <Field
-        label="Title"
-        value={draft.title}
-        onChange={(t) => setDraft({ ...draft, title: t })}
-        colors={colors}
-        onFocus={scrollFocusedInputIntoView}
-      />
-      <Field
-        label="Base servings"
-        value={String(draft.baseServings)}
-        onChange={(t) => setDraft({ ...draft, baseServings: Number(t) || 1 })}
-        colors={colors}
-        keyboardType="decimal-pad"
-        onFocus={scrollFocusedInputIntoView}
-      />
-      <Field
-        label="Cuisine"
-        value={draft.cuisine ?? ''}
-        onChange={(t) => setDraft({ ...draft, cuisine: t || undefined })}
-        colors={colors}
-        onFocus={scrollFocusedInputIntoView}
-      />
-      <Field
-        label="Tags (comma separated)"
-        value={draft.tags.join(', ')}
-        onChange={(t) =>
-          setDraft({
-            ...draft,
-            tags: t
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean),
-          })
+      <Screen
+        scroll
+        scrollRef={scrollRef}
+        header={{
+          title: 'Preview',
+          back: true,
+          onBack: () => setShowDiscardConfirm(true),
+        }}
+        gap={space.lg}
+        footer={
+          <Button
+            label={isSaving ? 'Saving…' : 'Save to library'}
+            size="lg"
+            fullWidth
+            icon="checkmark"
+            loading={isSaving}
+            disabled={isSaving}
+            accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe to library'}
+            onPress={save}
+          />
         }
-        colors={colors}
-        onFocus={scrollFocusedInputIntoView}
-      />
-      <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-        Ingredients (qty|unit|name|y/n|notes|exact/to_taste)
-      </Text>
-      <TextInput
-        accessibilityLabel="Ingredients, one per line"
-        multiline
-        value={ingredientText}
-        onChangeText={setIngredientText}
-        onEndEditing={() => setDraft(parseIngredientLines())}
-        onFocus={scrollFocusedInputIntoView}
-        style={{
-          minHeight: 140,
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textPrimary,
-          backgroundColor: colors.surface,
-          textAlignVertical: 'top',
-        }}
-      />
-      <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-        Steps (one per line)
-      </Text>
-      <TextInput
-        accessibilityLabel="Method steps, one per line"
-        multiline
-        value={stepText}
-        onChangeText={setStepText}
-        onEndEditing={() => setDraft(parseStepLines())}
-        onFocus={scrollFocusedInputIntoView}
-        style={{
-          minHeight: 140,
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textPrimary,
-          backgroundColor: colors.surface,
-          textAlignVertical: 'top',
-        }}
-      />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe to library'}
-          accessibilityState={{ disabled: isSaving, busy: isSaving }}
-          disabled={isSaving}
-          onPress={async () => {
-            // saveRecipe opens its own transaction, and SQLite has no nested
-            // transactions — a second tap mid-save fails the whole write.
-            if (isSaving) return;
-            setIsSaving(true);
-            const withIngredients = parseIngredientLines();
-            const withSteps = {
-              ...withIngredients,
-              steps: parseStepLines().steps,
-            };
-            setDraft(withSteps);
-            try {
-              await saveRecipe(withSteps);
-              router.replace(`/recipe/${withSteps.id}`);
-            } catch (e) {
-              setSaveError(
-                e instanceof Error ? e.message : 'Unknown error while saving.'
-              );
-            } finally {
-              setIsSaving(false);
-            }
-          }}
-          style={{
-            backgroundColor: colors.primary,
-            padding: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            marginTop: 8,
-            opacity: isSaving ? 0.6 : 1,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            {isSaving ? 'Saving…' : 'Save to library'}
-          </Text>
-        </Pressable>
-      </ScrollView>
-      <ConfirmDialog
-        visible={showDiscardConfirm}
-        destructive
-        title="Discard this import?"
-        message="The imported recipe has not been saved to your library."
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={() => {
-          setShowDiscardConfirm(false);
-          leaveScreen();
-        }}
-        onCancel={() => setShowDiscardConfirm(false)}
-      />
-      <AppDialog
-        visible={saveError !== null}
-        title="Could not save recipe"
-        message={saveError ?? ''}
-        actions={[{ label: 'OK', variant: 'primary' }]}
-        onClose={() => setSaveError(null)}
-      />
-    </View>
-    </KeyboardAvoidingView>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  colors,
-  keyboardType = 'default',
-  onFocus,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  colors: ReturnType<typeof useTheme>['colors'];
-  keyboardType?: 'default' | 'decimal-pad';
-  onFocus?: () => void;
-}) {
-  return (
-    <View>
-      <Text
-        style={{
-          fontFamily: 'DMSans_500Medium',
-          marginBottom: 6,
-          color: colors.textPrimary,
-        }}
       >
-        {label}
-      </Text>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        onChangeText={onChange}
-        onFocus={onFocus}
-        keyboardType={keyboardType}
-        style={{
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textPrimary,
-          backgroundColor: colors.surface,
-        }}
-      />
-    </View>
+        <Text variant="body" tone="secondary">
+          Review before saving. For deeper edits, open the manual form after saving.
+        </Text>
+
+        <TextField
+          label="Title"
+          accessibilityLabel="Title"
+          value={draft.title}
+          onChangeText={(t) => setDraft({ ...draft, title: t })}
+          onFocus={scrollFocusedInputIntoView}
+        />
+        <TextField
+          label="Base servings"
+          accessibilityLabel="Base servings"
+          value={String(draft.baseServings)}
+          onChangeText={(t) => setDraft({ ...draft, baseServings: Number(t) || 1 })}
+          keyboardType="decimal-pad"
+          onFocus={scrollFocusedInputIntoView}
+        />
+        <TextField
+          label="Cuisine"
+          accessibilityLabel="Cuisine"
+          value={draft.cuisine ?? ''}
+          onChangeText={(t) => setDraft({ ...draft, cuisine: t || undefined })}
+          onFocus={scrollFocusedInputIntoView}
+        />
+        <TextField
+          label="Tags"
+          hint="Separate with commas"
+          accessibilityLabel="Tags, comma separated"
+          value={draft.tags.join(', ')}
+          onChangeText={(t) =>
+            setDraft({
+              ...draft,
+              tags: t
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+          onFocus={scrollFocusedInputIntoView}
+        />
+
+        <TextField
+          label="Ingredients"
+          hint="One per line: qty | unit | name | y/n scalable | notes | exact/to_taste"
+          accessibilityLabel="Ingredients, one per line"
+          multiline
+          value={ingredientText}
+          onChangeText={setIngredientText}
+          onEndEditing={() => setDraft(parseIngredientLines())}
+          onFocus={scrollFocusedInputIntoView}
+        />
+        <TextField
+          label="Steps"
+          hint="One per line"
+          accessibilityLabel="Method steps, one per line"
+          multiline
+          value={stepText}
+          onChangeText={setStepText}
+          onEndEditing={() => setDraft(parseStepLines())}
+          onFocus={scrollFocusedInputIntoView}
+        />
+
+        <ConfirmDialog
+          visible={showDiscardConfirm}
+          destructive
+          title="Discard this import?"
+          message="The imported recipe has not been saved to your library."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          onConfirm={() => {
+            setShowDiscardConfirm(false);
+            leaveScreen();
+          }}
+          onCancel={() => setShowDiscardConfirm(false)}
+        />
+        <AppDialog
+          visible={saveError !== null}
+          title="Could not save recipe"
+          message={saveError ?? ''}
+          actions={[{ label: 'OK', variant: 'primary' }]}
+          onClose={() => setSaveError(null)}
+        />
+      </Screen>
+    </KeyboardAvoidingView>
   );
 }

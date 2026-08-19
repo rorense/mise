@@ -1,4 +1,5 @@
-import { useTheme } from '@/theme/ThemeContext';
+import { hitSlopFor, pressedStyle, ripple } from '@/components/ui/press';
+import { control, radius, space } from '@/theme/tokens';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { Image, Modal, Pressable, View } from 'react-native';
@@ -9,8 +10,14 @@ type FullscreenImageViewerProps = {
   onClose: () => void;
 };
 
+// The lightbox is always black regardless of theme, so its chrome is defined
+// here rather than coming from the palette — these are the only colours in the
+// app that must not follow the appearance setting.
+const CHROME_BG = 'rgba(0, 0, 0, 0.55)';
+const CHROME_BORDER = 'rgba(255, 255, 255, 0.28)';
+const CHROME_FG = '#FFFFFF';
+
 export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageViewerProps) {
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
@@ -23,28 +30,33 @@ export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageView
       presentationStyle="overFullScreen"
       onRequestClose={onClose}
     >
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <View style={{ flex: 1, backgroundColor: '#000000' }}>
         <StatusBar hidden={!!imageUri} />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close photo"
           onPress={onClose}
-          style={{
-            position: 'absolute',
-            top: insets.top + 12,
-            right: 18,
-            zIndex: 2,
-            width: 38,
-            height: 38,
-            borderRadius: 19,
-            borderWidth: 1,
-            borderColor: '#ffffff44',
-            backgroundColor: '#00000088',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          hitSlop={hitSlopFor(control.sm)}
+          android_ripple={ripple('rgba(255, 255, 255, 0.18)', true)}
+          style={({ pressed }) => [
+            {
+              position: 'absolute',
+              top: insets.top + space.md,
+              right: space.lg,
+              zIndex: 2,
+              width: control.sm,
+              height: control.sm,
+              borderRadius: radius.pill,
+              borderWidth: 1,
+              borderColor: CHROME_BORDER,
+              backgroundColor: CHROME_BG,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            pressedStyle(pressed),
+          ]}
         >
-          <Ionicons name="close" size={20} color="#fff" />
+          <Ionicons name="close" size={20} color={CHROME_FG} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -59,9 +71,7 @@ export function FullscreenImageViewer({ imageUri, onClose }: FullscreenImageView
               resizeMode="contain"
               style={{ width: '100%', height: '100%' }}
             />
-          ) : (
-            <View style={{ width: 1, height: 1, backgroundColor: colors.background }} />
-          )}
+          ) : null}
         </Pressable>
       </View>
     </Modal>

@@ -1,3 +1,15 @@
+import { AppDialog } from '@/components/AppDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import {
+  Button,
+  Card,
+  Divider,
+  Screen,
+  Section,
+  SegmentedControl,
+  Text,
+  TextField,
+} from '@/components/ui';
 import {
   exportBackupJson,
   getStoredRecipeCount,
@@ -8,9 +20,6 @@ import {
 } from '@/data/backup';
 import { cleanupUnusedMediaFiles } from '@/data/recipes';
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
-import { AppDialog } from '@/components/AppDialog';
-import { BackButton } from '@/components/BackButton';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   deleteAiApiKey,
   getAiApiKey,
@@ -24,19 +33,18 @@ import {
 } from '@/lib/secrets';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
+import { space } from '@/theme/tokens';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Switch, View } from 'react-native';
+
+const PROVIDER_LABEL: Record<AiProvider, string> = {
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+};
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
@@ -138,333 +146,233 @@ export default function SettingsScreen() {
     }
   }, [pendingRestore, isRestoring, load, setMode]);
 
+  const exportBackup = useCallback(async () => {
+    try {
+      const json = await exportBackupJson();
+      // Cache, not documents: the OS reclaims this, and it no longer
+      // inflates the storage figure shown above.
+      const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      if (!cacheDir) {
+        throw new Error('Storage directory unavailable');
+      }
+      const backupPath = `${cacheDir}mise-backup-${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(backupPath, json);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(backupPath);
+      }
+      setDialog({
+        title: 'Backup ready',
+        message:
+          'Includes your recipes, cook logs and photos. Save it somewhere off this device.',
+      });
+    } catch {
+      setDialog({
+        title: 'Backup failed',
+        message: 'Could not export backup on this device.',
+      });
+    }
+  }, []);
+
+  const providerName = PROVIDER_LABEL[aiProvider];
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
-      <ScrollView
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={{ padding: 20, paddingTop: 72, gap: 20, paddingBottom: 48 }}
+    <Screen scroll header={{ title: 'Settings', back: true }} gap={space.xxl}>
+      <Section
+        title="AI"
+        description="Your API key is stored on this device only, in the Android keystore. It is never included in a build."
       >
-        <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-          AI
-        </Text>
-      <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-        Your API key is stored on this device only, in the Android keystore. It is
-        never included in a build.
-      </Text>
+        <Card style={{ gap: space.lg }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: space.md,
+            }}
+          >
+            <View style={{ flex: 1, gap: space.xxs }}>
+              <Text variant="bodyStrong">AI features</Text>
+              <Text variant="caption" tone="secondary">
+                The recipe assistant and the suggestions generated from cook notes.
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="AI features"
+              accessibilityHint="Controls the recipe assistant and cook-note suggestions"
+              value={aiEnabled}
+              onValueChange={async (next) => {
+                setAiEnabledState(next);
+                await setAiEnabled(next);
+              }}
+              trackColor={{ false: colors.borderStrong, true: colors.primary }}
+              thumbColor={colors.surface}
+            />
+          </View>
 
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-        }}
-      >
-        <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, flex: 1 }}>
-          AI features
-        </Text>
-        <Switch
-          accessibilityLabel="AI features"
-          accessibilityHint="Controls the recipe assistant and cook-note suggestions"
-          value={aiEnabled}
-          onValueChange={async (next) => {
-            setAiEnabledState(next);
-            await setAiEnabled(next);
-          }}
-          trackColor={{ false: colors.border, true: colors.primary }}
-        />
-      </View>
-      <Text
-        style={{
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textSecondary,
-          fontSize: 13,
-          marginTop: -12,
-        }}
-      >
-        Covers the recipe assistant and the suggestions generated from cook notes.
-      </Text>
+          <Divider />
 
-      <View>
-        <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, marginBottom: 6 }}>
-          Provider
-        </Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {(['openai', 'gemini'] as AiProvider[]).map((provider) => (
-            <Pressable
-              key={provider}
-              accessibilityRole="button"
-              accessibilityLabel={provider === 'gemini' ? 'Gemini' : 'OpenAI'}
-              accessibilityState={{ selected: aiProvider === provider }}
-              onPress={async () => {
+          <View style={{ gap: space.sm }}>
+            <Text variant="label">Provider</Text>
+            <SegmentedControl<AiProvider>
+              value={aiProvider}
+              accessibilityLabel="AI provider"
+              options={[
+                { value: 'openai', label: 'OpenAI' },
+                { value: 'gemini', label: 'Gemini' },
+              ]}
+              onChange={async (provider) => {
                 setAiProviderState(provider);
                 await setAiProvider(provider);
                 // Keys are per provider, so the field below has to follow.
                 setApiKeyDraft('');
                 setHasStoredKey((await getAiApiKey(provider)) !== null);
               }}
-              style={{
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                borderRadius: 999,
-                backgroundColor:
-                  aiProvider === provider ? colors.primary + '33' : colors.surface,
-                borderWidth: 1,
-                borderColor: aiProvider === provider ? colors.primary : colors.border,
-              }}
-            >
-              <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
-                {provider === 'gemini' ? 'Gemini' : 'OpenAI'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
+            />
+          </View>
 
-      <View>
-        <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary, marginBottom: 6 }}>
-          {aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} API key
-        </Text>
-        <Text
-          style={{
-            fontFamily: 'DMSans_400Regular',
-            color: colors.textSecondary,
-            fontSize: 13,
-            marginBottom: 8,
-          }}
-        >
-          {hasStoredKey
-            ? 'A key is saved. Enter a new one to replace it.'
-            : 'No key saved yet. Import and the assistant need one.'}
-        </Text>
-        <TextInput
-          accessibilityLabel={`${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} API key`}
-          value={apiKeyDraft}
-          onChangeText={setApiKeyDraft}
-          placeholder={hasStoredKey ? '••••••••  (saved)' : 'Paste your API key'}
-          placeholderTextColor={colors.textSecondary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 12,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            fontFamily: 'DMSans_400Regular',
-            color: colors.textPrimary,
-            backgroundColor: colors.surface,
-          }}
+          <View style={{ gap: space.sm }}>
+            <TextField
+              label={`${providerName} API key`}
+              accessibilityLabel={`${providerName} API key`}
+              hint={
+                hasStoredKey
+                  ? 'A key is saved. Enter a new one to replace it.'
+                  : 'No key saved yet. Import and the assistant need one.'
+              }
+              value={apiKeyDraft}
+              onChangeText={setApiKeyDraft}
+              placeholder={hasStoredKey ? '••••••••  (saved)' : 'Paste your API key'}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <View style={{ flexDirection: 'row', gap: space.sm }}>
+              <Button
+                label="Save key"
+                accessibilityLabel="Save API key"
+                disabled={apiKeyDraft.trim().length === 0}
+                style={{ flex: 1 }}
+                onPress={async () => {
+                  await setAiApiKey(aiProvider, apiKeyDraft);
+                  setApiKeyDraft('');
+                  setHasStoredKey(true);
+                  setDialog({
+                    title: 'Key saved',
+                    message: 'Stored on this device only.',
+                  });
+                }}
+              />
+              {hasStoredKey ? (
+                <Button
+                  label="Remove"
+                  variant="secondary"
+                  accessibilityLabel="Remove saved API key"
+                  onPress={async () => {
+                    await deleteAiApiKey(aiProvider);
+                    setApiKeyDraft('');
+                    setHasStoredKey(false);
+                    setDialog({
+                      title: 'Key removed',
+                      message: 'AI features will stop working until you add one.',
+                    });
+                  }}
+                />
+              ) : null}
+            </View>
+          </View>
+        </Card>
+      </Section>
+
+      <Section title="Appearance">
+        <SegmentedControl<AppearanceMode>
+          value={mode}
+          accessibilityLabel="Appearance"
+          onChange={(m) => void setMode(m)}
+          options={[
+            { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
+            { value: 'light', label: 'Light', icon: 'sunny-outline' },
+            { value: 'dark', label: 'Dark', icon: 'moon-outline' },
+          ]}
         />
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Save API key"
-            accessibilityState={{ disabled: apiKeyDraft.trim().length === 0 }}
-            disabled={apiKeyDraft.trim().length === 0}
+      </Section>
+
+      <Section title="Storage">
+        <Card style={{ gap: space.lg }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: space.md,
+            }}
+          >
+            <Text variant="body" tone="secondary">
+              Approximate document storage
+            </Text>
+            <Text variant="bodyStrong">{storage}</Text>
+          </View>
+          <Button
+            label="Clean up unused photos"
+            variant="secondary"
+            fullWidth
+            icon="sparkles-outline"
+            accessibilityLabel="Clean up unused photos"
+            accessibilityHint="Deletes photo files no longer attached to any recipe or cook log"
             onPress={async () => {
-              await setAiApiKey(aiProvider, apiKeyDraft);
-              setApiKeyDraft('');
-              setHasStoredKey(true);
+              const result = await cleanupUnusedMediaFiles();
+              await load();
               setDialog({
-                title: 'Key saved',
-                message: 'Stored on this device only.',
+                title: 'Storage cleanup',
+                message:
+                  result.deletedCount === 0
+                    ? 'No unused photos found.'
+                    : `Removed ${result.deletedCount} unused photo${result.deletedCount === 1 ? '' : 's'}.`,
               });
             }}
-            style={{
-              flex: 1,
-              backgroundColor: colors.primary,
-              borderRadius: 12,
-              padding: 12,
-              alignItems: 'center',
-              opacity: apiKeyDraft.trim().length === 0 ? 0.5 : 1,
-            }}
-          >
-            <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Save key</Text>
-          </Pressable>
-          {hasStoredKey ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Remove saved API key"
-              onPress={async () => {
-                await deleteAiApiKey(aiProvider);
-                setApiKeyDraft('');
-                setHasStoredKey(false);
-                setDialog({
-                  title: 'Key removed',
-                  message: 'AI features will stop working until you add one.',
-                });
-              }}
-              style={{
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                padding: 12,
-                alignItems: 'center',
-                paddingHorizontal: 16,
-              }}
-            >
-              <Text style={{ color: colors.destructive, fontFamily: 'DMSans_700Bold' }}>
-                Remove
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
+          />
+        </Card>
+      </Section>
 
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Appearance
-      </Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {(['system', 'light', 'dark'] as AppearanceMode[]).map((m) => (
-          <Pressable
-            key={m}
-            accessibilityRole="button"
-            accessibilityLabel={`${m[0].toUpperCase() + m.slice(1)} appearance`}
-            accessibilityState={{ selected: mode === m }}
-            onPress={() => setMode(m)}
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderRadius: 999,
-              backgroundColor: mode === m ? colors.primary + '33' : colors.surface,
-              borderWidth: 1,
-              borderColor: mode === m ? colors.primary : colors.border,
-            }}
-          >
-            <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-              {m[0].toUpperCase() + m.slice(1)}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Storage
-      </Text>
-      <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-        Approximate document storage: {storage}
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Clean up unused photos"
-        accessibilityHint="Deletes photo files no longer attached to any recipe or cook log"
-        onPress={async () => {
-          const result = await cleanupUnusedMediaFiles();
-          await load();
-          setDialog({
-            title: 'Storage cleanup',
-            message:
-              result.deletedCount === 0
-                ? 'No unused photos found.'
-                : `Removed ${result.deletedCount} unused photo${result.deletedCount === 1 ? '' : 's'}.`,
-          });
-        }}
-        style={{
-          backgroundColor: colors.surface,
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          alignItems: 'center',
-        }}
+      <Section
+        title="Data backup"
+        description="Restoring replaces every recipe on this device. Export a backup first if you want to keep what is here. Backups include photos, so they can be large."
       >
-        <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
-          Cleanup unused photos
-        </Text>
-      </Pressable>
-      <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 22, color: colors.textPrimary }}>
-        Data backup
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Export backup"
-        accessibilityHint="Creates a backup file and opens the share sheet"
-        onPress={async () => {
-          try {
-            const json = await exportBackupJson();
-            // Cache, not documents: the OS reclaims this, and it no longer
-            // inflates the storage figure shown above.
-            const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-            if (!cacheDir) {
-              throw new Error('Storage directory unavailable');
-            }
-            const backupPath = `${cacheDir}mise-backup-${Date.now()}.json`;
-            await FileSystem.writeAsStringAsync(backupPath, json);
-            if (await Sharing.isAvailableAsync()) {
-              await Sharing.shareAsync(backupPath);
-            }
-            setDialog({
-              title: 'Backup ready',
-              message:
-                'Includes your recipes, cook logs and photos. Save it somewhere off this device.',
-            });
-          } catch {
-            setDialog({
-              title: 'Backup failed',
-              message: 'Could not export backup on this device.',
-            });
-          }
-        }}
-        style={{
-          backgroundColor: colors.surface,
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
-          padding: 12,
-          alignItems: 'center',
-        }}
-      >
-        <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
-          Export backup
-        </Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Choose a backup file to restore"
-        accessibilityHint="Replaces all recipes on this device. You will be asked to confirm first."
-        accessibilityState={{ disabled: isRestoring }}
-        disabled={isRestoring}
-        onPress={pickBackupToRestore}
-        style={{
-          backgroundColor: colors.primary,
-          borderRadius: 12,
-          padding: 12,
-          alignItems: 'center',
-          opacity: isRestoring ? 0.6 : 1,
-        }}
-      >
-        <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-          {isRestoring ? 'Restoring…' : 'Upload backup and restore'}
-        </Text>
-      </Pressable>
-      <Text
-        style={{
-          fontFamily: 'DMSans_400Regular',
-          color: colors.textSecondary,
-          fontSize: 13,
-          marginTop: -8,
-        }}
-      >
-Restoring replaces every recipe on this device. Export a backup first if you
-        want to keep what is here. Backups include photos, so they can be large.
-      </Text>
+        <Card style={{ gap: space.sm }}>
+          <Button
+            label="Export backup"
+            variant="secondary"
+            fullWidth
+            icon="share-outline"
+            accessibilityLabel="Export backup"
+            accessibilityHint="Creates a backup file and opens the share sheet"
+            onPress={exportBackup}
+          />
+          <Button
+            label={isRestoring ? 'Restoring…' : 'Upload backup and restore'}
+            fullWidth
+            icon="cloud-upload-outline"
+            loading={isRestoring}
+            disabled={isRestoring}
+            accessibilityLabel="Choose a backup file to restore"
+            accessibilityHint="Replaces all recipes on this device. You will be asked to confirm first."
+            onPress={pickBackupToRestore}
+          />
+        </Card>
+      </Section>
 
-      <Pressable
-        accessibilityRole="button"
+      <Button
+        label="About"
+        variant="ghost"
         accessibilityLabel="About Mise en"
+        style={{ alignSelf: 'center' }}
         onPress={() =>
           setDialog({
             title: 'Mise en',
             message: 'Personal recipe journal — local only.',
           })
         }
-      >
-        <Text style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}>About</Text>
-      </Pressable>
-      </ScrollView>
+      />
+
       <ConfirmDialog
         visible={pendingRestore !== null}
         destructive
@@ -497,7 +405,7 @@ Restoring replaces every recipe on this device. Export a backup first if you
         actions={[{ label: 'OK', variant: 'primary' }]}
         onClose={() => setDialog(null)}
       />
-    </View>
+    </Screen>
   );
 }
 

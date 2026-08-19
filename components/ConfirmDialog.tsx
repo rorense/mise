@@ -1,5 +1,6 @@
-import { useTheme } from '@/theme/ThemeContext';
-import { Modal, Pressable, Text, View } from 'react-native';
+import { Button, ModalCard, Text } from '@/components/ui';
+import { space } from '@/theme/tokens';
+import { View } from 'react-native';
 
 type ConfirmDialogProps = {
   visible: boolean;
@@ -22,83 +23,26 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const { colors } = useTheme();
-
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss"
-        onPress={onCancel}
+    <ModalCard visible={visible} onClose={onCancel} title={title}>
+      <Text variant="body" tone="secondary">
+        {message}
+      </Text>
+      <View
         style={{
-          flex: 1,
-          backgroundColor: '#0006',
-          padding: 24,
-          justifyContent: 'center',
+          flexDirection: 'row',
+          justifyContent: 'flex-end',
+          gap: space.sm,
+          marginTop: space.xs,
         }}
       >
-        <Pressable
-          // See AppDialog: grouping would make the buttons unreachable.
-          accessible={false}
-          accessibilityViewIsModal
-          onPress={() => undefined}
-          style={{
-            backgroundColor: colors.surface,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: colors.border,
-            padding: 16,
-            gap: 10,
-          }}
-        >
-          <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 20, color: colors.textPrimary }}>
-            {title}
-          </Text>
-          <Text
-            style={{
-              fontFamily: 'DMSans_400Regular',
-              color: colors.textSecondary,
-              lineHeight: 21,
-            }}
-          >
-            {message}
-          </Text>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={cancelLabel}
-              onPress={onCancel}
-              style={{
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: colors.background,
-              }}
-            >
-              <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-                {cancelLabel}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={confirmLabel}
-              onPress={onConfirm}
-              style={{
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                borderRadius: 10,
-                backgroundColor: destructive ? colors.destructive : colors.primary,
-              }}
-            >
-              <Text style={{ fontFamily: 'DMSans_700Bold', color: '#fff' }}>
-                {confirmLabel}
-              </Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        <Button label={cancelLabel} variant="secondary" onPress={onCancel} />
+        <Button
+          label={confirmLabel}
+          variant={destructive ? 'destructive' : 'primary'}
+          onPress={onConfirm}
+        />
+      </View>
+    </ModalCard>
   );
 }

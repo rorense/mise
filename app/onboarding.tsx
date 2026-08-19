@@ -1,8 +1,16 @@
-import { BackButton } from '@/components/BackButton';
+import { Button, Card, Screen, Text } from '@/components/ui';
 import { setOnboarded } from '@/lib/secrets';
-import { useTheme } from '@/theme/ThemeContext';
+import { space } from '@/theme/tokens';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { View } from 'react-native';
+import { useTheme } from '@/theme/ThemeContext';
+
+const STEPS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+  { icon: 'download-outline', text: 'Add a recipe manually or import one from a web page.' },
+  { icon: 'options-outline', text: 'Adjust servings and cook from the recipe detail page.' },
+  { icon: 'camera-outline', text: 'Log each cook with a photo and notes.' },
+];
 
 export default function OnboardingScreen() {
   const { colors } = useTheme();
@@ -14,73 +22,56 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton />
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 24, paddingTop: 80, gap: 16 }}
-      >
-        <Text
-          style={{
-            fontFamily: 'Lora_700Bold',
-            fontSize: 32,
-            color: colors.textPrimary,
-          }}
-        >
+    <Screen
+      scroll
+      gutter={space.xxl}
+      gap={space.lg}
+      footer={
+        <Button
+          label="Start using Mise en"
+          size="lg"
+          fullWidth
+          onPress={finish}
+        />
+      }
+    >
+      <View style={{ gap: space.md, paddingTop: space.xxl }}>
+        <Text variant="display" accessibilityRole="header">
           Welcome to Mise en
         </Text>
-        <Text
-          style={{
-            fontFamily: 'DMSans_400Regular',
-            color: colors.textSecondary,
-            lineHeight: 22,
-          }}
-        >
+        <Text variant="body" tone="secondary">
           Save recipes, scale servings smoothly, and keep a cook journal with
           photos and notes. Everything works offline except imports and AI chat.
         </Text>
+      </View>
 
-        <View
-          style={{
-            backgroundColor: colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 16,
-            padding: 14,
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-            Quick start
-          </Text>
-          <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            1. Add a recipe manually or import one from a web page.
-          </Text>
-          <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            2. Adjust servings and cook from the recipe detail page.
-          </Text>
-          <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            3. Log each cook with a photo and notes.
-          </Text>
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Start using Mise en"
-          onPress={finish}
-          style={{
-            marginTop: 8,
-            backgroundColor: colors.primary,
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>
-            Start using Mise en
-          </Text>
-        </Pressable>
-      </ScrollView>
-    </View>
+      <Card level={0} style={{ gap: space.md }}>
+        <Text variant="overline" tone="secondary">
+          Quick start
+        </Text>
+        {STEPS.map((step, i) => (
+          <View
+            key={step.icon}
+            style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start' }}
+          >
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: colors.primarySoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name={step.icon} size={15} color={colors.onPrimarySoft} />
+            </View>
+            <Text variant="body" tone="secondary" style={{ flex: 1 }}>
+              {i + 1}. {step.text}
+            </Text>
+          </View>
+        ))}
+      </Card>
+    </Screen>
   );
 }

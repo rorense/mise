@@ -4,41 +4,47 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
 import { RecipeChatSheet, type RecipeChatSheetRef } from '@/components/RecipeChatSheet';
 import {
+  Button,
+  Card,
+  Chip,
+  IconButton,
+  ImageScrim,
+  Text,
+  TextField,
+} from '@/components/ui';
+import { pressedStyle, ripple } from '@/components/ui/press';
+import {
   addCookLog,
   cleanupUnusedMediaFiles,
   createRecipeAdjustment,
   enqueueCookLogAdjustmentTask,
   getRecipeById,
+  getRecipeServingsOverride,
   ignoreRecipeAdjustment,
   listPendingRecipeAdjustments,
-  getRecipeServingsOverride,
   setRecipeArchived,
   setRecipeFlags,
-  setRecipeMainImageFromCookLog,
   setRecipeMainImage,
-  setRecipeTags,
+  setRecipeMainImageFromCookLog,
   setRecipeServingsOverride,
+  setRecipeTags,
 } from '@/data/recipes';
-import type { Recipe, RecipeAdjustment } from '@/types/recipe';
+import { resolveRecipeHeroImage } from '@/domain/recipeImages';
 import {
   formatIngredientAmount,
   ingredientShowsAdjustToTasteHint,
   renderStepInstruction,
   splitIngredientSections,
 } from '@/domain/scaling';
-import { resolveRecipeHeroImage } from '@/domain/recipeImages';
-import {
-  normalizeServings,
-  shouldCommitSliderTick,
-} from '@/domain/slider';
-import { getAiEnabled } from '@/lib/secrets';
+import { normalizeServings, shouldCommitSliderTick } from '@/domain/slider';
+import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
+import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
+import { newId } from '@/lib/id';
 import {
   compressAndSaveCookPhoto,
   compressAndSaveMainRecipePhoto,
 } from '@/lib/media';
-import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
-import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
-import { newId } from '@/lib/id';
+import { getAiEnabled } from '@/lib/secrets';
 import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers';
 import {
   ensureTimerNotificationPermission,
@@ -50,7 +56,11 @@ import {
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
 import { useTheme } from '@/theme/ThemeContext';
+import { elevation, radius, space } from '@/theme/tokens';
+import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
+import Slider from '@react-native-community/slider';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,17 +72,17 @@ import {
   Pressable,
   ScrollView,
   Share,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import NetInfo from '@react-native-community/netinfo';
+
+const HERO_HEIGHT = 280;
+/** Reading mode bumps body copy for arm's-length legibility at the stove. */
+const READ_MODE_BODY = { fontSize: 17, lineHeight: 27 } as const;
 
 export default function RecipeDetailScreen() {
   const { id, fromImport } = useLocalSearchParams<{ id: string; fromImport?: string }>();
-  const { colors } = useTheme();
+  const { colors, resolved } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<RecipeChatSheetRef>(null);
@@ -215,37 +225,43 @@ export default function RecipeDetailScreen() {
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-        <Text style={{ color: colors.textSecondary }}>Loading…</Text>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
 
   if (isMissing || !recipe || servings === null) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, paddingHorizontal: 24 }}>
-        <Text style={{ color: colors.textPrimary, fontFamily: 'Lora_700Bold', fontSize: 20, marginBottom: 8 }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.background,
+          paddingHorizontal: space.xxl,
+          gap: space.lg,
+        }}
+      >
+        <Ionicons name="help-circle-outline" size={44} color={colors.textSecondary} />
+        <Text variant="heading" accessibilityRole="header">
           Recipe not found
         </Text>
-        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginBottom: 14 }}>
+        <Text variant="body" tone="secondary" style={{ textAlign: 'center' }}>
           This recipe may have been removed.
         </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to library"
-          onPress={() => router.replace('/')}
-          style={{
-            backgroundColor: colors.primary,
-            borderRadius: 12,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-          }}
-        >
-          <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Back to library</Text>
-        </Pressable>
+        <Button label="Back to library" onPress={() => router.replace('/')} />
       </View>
     );
   }
+
 
   const hero = resolveRecipeHeroImage(
     recipe.mainImageUri,
@@ -615,175 +631,130 @@ export default function RecipeDetailScreen() {
       behavior={KEYBOARD_AVOIDING_BEHAVIOR}
       keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
     >
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <BackButton onPress={shouldBackToHome ? () => router.replace('/') : undefined} />
-      <ScrollView
-        ref={scrollRef}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: 120 }}
-      >
-        <View style={{ height: 260, backgroundColor: colors.border }}>
-          {hero ? (
-            <Pressable
-              accessibilityRole="imagebutton"
-              accessibilityLabel={`Photo of ${recipe.title}`}
-              accessibilityHint="Opens the photo full screen"
-              onPress={() => setFullscreenImageUri(hero)}
-              style={{ width: '100%', height: '100%' }}
-            >
-              <Image source={{ uri: hero }} style={{ width: '100%', height: '100%' }} />
-            </Pressable>
-          ) : (
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
-            </View>
-          )}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Change main photo"
-            onPress={() =>
-              setDialog({
-                title: 'Main image',
-                message: 'Choose how to set the recipe main image.',
-                actions: [
-                  { label: 'Cancel' },
-                  {
-                    label: 'Clear',
-                    onPress: async () => {
-                      await setRecipeMainImage(recipe.id, undefined);
-                      await reload();
-                    },
-                  },
-                  {
-                    label: 'Photo library',
-                    onPress: () => setMainImageFromLibrary(),
-                  },
-                  { label: 'Camera', onPress: () => setMainImageFromCamera() },
-                ],
-              })
-            }
-            style={{
-              position: 'absolute',
-              right: 10,
-              bottom: 10,
-              width: 34,
-              height: 34,
-              borderRadius: 17,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#0000007a',
-              borderWidth: 1,
-              borderColor: '#ffffff80',
-            }}
-          >
-            <Ionicons name="camera-outline" size={17} color="#fff" />
-          </Pressable>
-        </View>
-        <View style={{ padding: 20, gap: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text
-              style={{ flex: 1, fontFamily: 'Lora_700Bold', fontSize: 26, color: colors.textPrimary }}
-            >
-              {recipe.title}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Reading mode"
-              accessibilityHint="Hides everything except ingredients and method"
-              accessibilityState={{ selected: readMode }}
-              onPress={() => setReadMode((v) => !v)}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 17,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: readMode ? colors.primary : colors.border,
-                backgroundColor: readMode ? colors.primary + '22' : colors.surface,
-              }}
-            >
-              <Ionicons
-                name={readMode ? 'book' : 'book-outline'}
-                size={18}
-                color={readMode ? colors.primary : colors.textPrimary}
-              />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Recipe actions"
-              accessibilityHint="Edit, share, version history, archive"
-              onPress={openQuickActions}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 17,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: colors.surface,
-              }}
-            >
-              <Ionicons name="ellipsis-horizontal" size={18} color={colors.textPrimary} />
-            </Pressable>
-          </View>
-          {!readMode && recipe.sourceUrl ? (
-            <Text
-              accessibilityRole="link"
-              accessibilityLabel="Open original recipe source in browser"
-              onPress={() => Linking.openURL(recipe.sourceUrl)}
-              style={{ color: colors.primary, fontFamily: 'DMSans_500Medium' }}
-            >
-              Open source
-            </Text>
-          ) : null}
-          {!readMode ? (
-            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textSecondary }}>
-            {recipe.cuisine ? `${recipe.cuisine} · ` : ''}
-            {recipe.tags.length > 0 ? recipe.tags.join(' · ') : 'No tags yet'}
-          </Text>
-          ) : null}
-          {!readMode ? (
-            <>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                {recipe.tags.map((tag) => (
-                  <Pressable
-                    key={tag}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Tag ${tag}`}
-                    accessibilityHint="Removes this tag"
-                    accessibilityState={{ disabled: isUpdatingTags }}
-                    disabled={isUpdatingTags}
-                    onPress={() => removeTag(tag)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 999,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                      backgroundColor: colors.surface,
-                      opacity: isUpdatingTags ? 0.7 : 1,
-                    }}
-                  >
-                    <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-                      {tag}
-                    </Text>
-                    <Ionicons name="close" size={14} color={colors.textSecondary} />
-                  </Pressable>
-                ))}
-              </View>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <BackButton
+          overImage={Boolean(hero)}
+          onPress={shouldBackToHome ? () => router.replace('/') : undefined}
+        />
+        <ScrollView
+          ref={scrollRef}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+        >
+          <View style={{ height: HERO_HEIGHT, backgroundColor: colors.surfaceMuted }}>
+            {hero ? (
+              <Pressable
+                accessibilityRole="imagebutton"
+                accessibilityLabel={`Photo of ${recipe.title}`}
+                accessibilityHint="Opens the photo full screen"
+                onPress={() => setFullscreenImageUri(hero)}
+                style={{ width: '100%', height: '100%' }}
               >
-                <TextInput
+                <Image
+                  source={{ uri: hero }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="cover"
+                />
+              </Pressable>
+            ) : (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+              </View>
+            )}
+            {/* Darkens the top of the photo so the floating back arrow stays
+                visible over a pale image. */}
+            {hero ? <ImageScrim from="top" height={112} /> : null}
+            <IconButton
+              icon="camera-outline"
+              accessibilityLabel="Change main photo"
+              accessibilityHint="Set, replace, or clear the recipe photo"
+              variant={hero ? 'onImage' : 'surface'}
+              onPress={() =>
+                setDialog({
+                  title: 'Main image',
+                  message: 'Choose how to set the recipe main image.',
+                  actions: [
+                    { label: 'Cancel' },
+                    {
+                      label: 'Clear',
+                      onPress: async () => {
+                        await setRecipeMainImage(recipe.id, undefined);
+                        await reload();
+                      },
+                    },
+                    {
+                      label: 'Photo library',
+                      onPress: () => setMainImageFromLibrary(),
+                    },
+                    { label: 'Camera', onPress: () => setMainImageFromCamera() },
+                  ],
+                })
+              }
+              style={{ position: 'absolute', right: space.md, bottom: space.md }}
+            />
+          </View>
+
+          <View style={{ padding: space.xl, gap: space.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+              <Text variant="title" accessibilityRole="header" style={{ flex: 1 }}>
+                {recipe.title}
+              </Text>
+              <IconButton
+                icon={readMode ? 'book' : 'book-outline'}
+                accessibilityLabel="Reading mode"
+                accessibilityHint="Hides everything except ingredients and method"
+                accessibilityState={{ selected: readMode }}
+                variant={readMode ? 'accent' : 'surface'}
+                onPress={() => setReadMode((v) => !v)}
+              />
+              <IconButton
+                icon="ellipsis-horizontal"
+                accessibilityLabel="Recipe actions"
+                accessibilityHint="Edit, share, version history, archive"
+                onPress={openQuickActions}
+              />
+            </View>
+
+            {!readMode && recipe.sourceUrl ? (
+              <Text
+                variant="label"
+                tone="accent"
+                accessibilityRole="link"
+                accessibilityLabel="Open original recipe source in browser"
+                onPress={() => Linking.openURL(recipe.sourceUrl)}
+              >
+                Open source ↗
+              </Text>
+            ) : null}
+
+            {!readMode ? (
+              <Text variant="caption" tone="secondary">
+                {recipe.cuisine ? `${recipe.cuisine} · ` : ''}
+                {recipe.tags.length > 0 ? recipe.tags.join(' · ') : 'No tags yet'}
+              </Text>
+            ) : null}
+
+            {!readMode ? (
+              <>
+                {recipe.tags.length > 0 ? (
+                  <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+                    {recipe.tags.map((tag) => (
+                      <Chip
+                        key={tag}
+                        label={tag}
+                        icon="close"
+                        accessibilityLabel={`Tag ${tag}`}
+                        accessibilityHint="Removes this tag"
+                        onPress={() => {
+                          if (!isUpdatingTags) void removeTag(tag);
+                        }}
+                        style={{ opacity: isUpdatingTags ? 0.6 : 1 }}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+
+                <TextField
                   accessibilityLabel="Add tags, comma separated"
                   value={tagDraft}
                   onChangeText={setTagDraft}
@@ -792,732 +763,737 @@ export default function RecipeDetailScreen() {
                   }}
                   editable={!isUpdatingTags}
                   placeholder="Add tags (comma separated)"
-                  placeholderTextColor={colors.textSecondary}
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    borderRadius: 10,
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                    color: colors.textPrimary,
-                    backgroundColor: colors.surface,
-                    opacity: isUpdatingTags ? 0.7 : 1,
-                  }}
+                  returnKeyType="done"
+                  trailing={
+                    <IconButton
+                      icon="add"
+                      accessibilityLabel="Add tags"
+                      variant="accent"
+                      size={32}
+                      iconSize={18}
+                      disabled={isUpdatingTags}
+                      onPress={() => {
+                        void addTagsFromDraft();
+                      }}
+                    />
+                  }
                 />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Add tags"
-                  accessibilityState={{ disabled: isUpdatingTags }}
-                  onPress={() => {
-                    void addTagsFromDraft();
-                  }}
-                  disabled={isUpdatingTags}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: colors.primary,
-                    backgroundColor: colors.primary + '1A',
-                    borderRadius: 10,
-                    paddingHorizontal: 12,
-                    paddingVertical: 9,
-                    opacity: isUpdatingTags ? 0.7 : 1,
-                  }}
-                >
-                  <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.primary }}>Add</Text>
-                </Pressable>
-              </View>
-            </>
-          ) : null}
-          {!readMode ? (
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Favourite"
-              accessibilityState={{ selected: recipe.isFavorite }}
-              onPress={toggleFavorite}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                borderRadius: 999,
-                backgroundColor: recipe.isFavorite ? colors.primary + '22' : colors.surface,
-                borderWidth: 1,
-                borderColor: recipe.isFavorite ? colors.primary : colors.border,
-              }}
-            >
-              <Ionicons
-                name={recipe.isFavorite ? 'star' : 'star-outline'}
-                size={14}
-                color={recipe.isFavorite ? colors.primary : colors.textPrimary}
-              />
-              <Text
-                style={{
-                  fontFamily: 'DMSans_500Medium',
-                  color: recipe.isFavorite ? colors.primary : colors.textPrimary,
-                }}
-              >
-                Favorite
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Want to cook"
-              accessibilityState={{ selected: recipe.wantToCook }}
-              onPress={toggleWantToCook}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                borderRadius: 999,
-                backgroundColor: recipe.wantToCook ? colors.primary + '22' : colors.surface,
-                borderWidth: 1,
-                borderColor: recipe.wantToCook ? colors.primary : colors.border,
-              }}
-            >
-              <Ionicons
-                name={recipe.wantToCook ? 'flame' : 'flame-outline'}
-                size={14}
-                color={recipe.wantToCook ? colors.primary : colors.textPrimary}
-              />
-              <Text
-                style={{
-                  fontFamily: 'DMSans_500Medium',
-                  color: recipe.wantToCook ? colors.primary : colors.textPrimary,
-                }}
-              >
-                Want to cook
-              </Text>
-            </Pressable>
-            </View>
-          ) : null}
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Checklist mode"
-              accessibilityHint="Lets you tick off ingredients as you go"
-              accessibilityState={{ selected: checklistMode }}
-              onPress={() => setChecklistMode((v) => !v)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                borderRadius: 999,
-                backgroundColor: checklistMode ? colors.primary + '22' : colors.surface,
-                borderWidth: 1,
-                borderColor: checklistMode ? colors.primary : colors.border,
-              }}
-            >
-              <Ionicons
-                name={checklistMode ? 'checkbox' : 'checkbox-outline'}
-                size={14}
-                color={checklistMode ? colors.primary : colors.textPrimary}
-              />
-              <Text
-                style={{
-                  fontFamily: 'DMSans_500Medium',
-                  color: checklistMode ? colors.primary : colors.textPrimary,
-                }}
-              >
-                Checklist
-              </Text>
-            </Pressable>
-            {checklistMode ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Clear ticked ingredients"
-                onPress={() => setCheckedIngredientIds([])}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 999,
-                  backgroundColor: colors.surface,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                }}
-              >
-                <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.textPrimary }}>
-                  Reset checks
-                </Text>
-              </Pressable>
+
+                <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+                  <Chip
+                    label="Favorite"
+                    icon={recipe.isFavorite ? 'star' : 'star-outline'}
+                    active={recipe.isFavorite}
+                    accessibilityLabel="Favourite"
+                    accessibilityHint={
+                      recipe.isFavorite ? 'Removes the favourite mark' : 'Marks as favourite'
+                    }
+                    onPress={toggleFavorite}
+                  />
+                  <Chip
+                    label="Want to cook"
+                    icon={recipe.wantToCook ? 'flame' : 'flame-outline'}
+                    active={recipe.wantToCook}
+                    accessibilityLabel="Want to cook"
+                    accessibilityHint={
+                      recipe.wantToCook ? 'Removes the want-to-cook mark' : 'Marks as want to cook'
+                    }
+                    onPress={toggleWantToCook}
+                  />
+                </View>
+              </>
             ) : null}
-          </View>
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              padding: 16,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>Serves</Text>
-              <Text style={{ fontFamily: 'Lora_700Bold', fontSize: 20, color: colors.primary }}>
-                {Math.round(servings)}
-              </Text>
-            </View>
-            <Slider
-              minimumValue={1}
-              maximumValue={sliderMax}
-              step={1}
-              value={servings}
-              onSlidingStart={() => {
-                isSlidingRef.current = true;
-              }}
-              onValueChange={(value) => {
-                if (!isSlidingRef.current) {
-                  return;
-                }
-                const now = Date.now();
-                if (!shouldCommitSliderTick(lastSliderCommitAtRef.current, now)) {
-                  return;
-                }
-                lastSliderCommitAtRef.current = now;
-                const nextServings = normalizeServings(value, sliderMax);
-                setServings(nextServings);
-              }}
-              onSlidingComplete={(value) => {
-                isSlidingRef.current = false;
-                lastSliderCommitAtRef.current = Date.now();
-                const nextServings = normalizeServings(value, sliderMax);
-                setServings(nextServings);
-                void setRecipeServingsOverride(recipe.id, nextServings);
-              }}
-              minimumTrackTintColor={colors.primary}
-              maximumTrackTintColor={colors.border}
-              thumbTintColor={colors.primary}
-            />
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Ingredients section"
-            accessibilityState={{ expanded: showIngredients }}
-            onPress={() => setShowIngredients((v) => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}
-          >
-            <Ionicons
-              name={showIngredients ? 'chevron-down' : 'chevron-forward'}
-              size={16}
-              color={colors.textPrimary}
-            />
-            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-              Ingredients
-            </Text>
-          </Pressable>
-          {(readMode || showIngredients)
-            ? ingredientSections.map((section, sectionIdx) => (
-                <View
-                  key={`section-${section.title ?? 'default'}-${sectionIdx}`}
-                  style={{ marginTop: sectionIdx === 0 ? 0 : 6 }}
-                >
-                  {section.title ? (
-                    <Text
-                      style={{
-                        color: colors.textPrimary,
-                        fontFamily: 'DMSans_700Bold',
-                        marginTop: sectionIdx === 0 ? 0 : 4,
-                        marginBottom: 4,
-                      }}
-                    >
-                      {section.title}
-                    </Text>
-                  ) : null}
-                  {section.ingredients.map((ing) => {
-                    const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
-                    const checked = checkedIngredientIds.includes(ing.id);
-                    return (
-                      <Pressable
-                        key={ing.id}
-                        accessibilityRole={checklistMode ? 'checkbox' : 'text'}
-                        accessibilityLabel={`${amount} ${ing.name}`}
-                        accessibilityState={checklistMode ? { checked } : undefined}
-                        accessibilityHint={checklistMode ? 'Ticks this ingredient off' : undefined}
-                        onPress={() => {
-                          if (checklistMode) {
-                            toggleIngredientChecked(ing.id);
-                          }
-                        }}
-                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 }}
-                      >
-                        {checklistMode ? (
-                          <Ionicons
-                            name={checked ? 'checkbox' : 'square-outline'}
-                            size={18}
-                            color={checked ? colors.primary : colors.textSecondary}
-                          />
-                        ) : null}
-                        <Text
-                          style={{
-                            fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
-                            color: checked ? colors.textSecondary : colors.textPrimary,
-                            textDecorationLine: checked ? 'line-through' : 'none',
-                            fontSize: readMode ? 17 : 15,
-                            lineHeight: readMode ? 26 : 21,
-                          }}
-                        >
-                          {!checklistMode ? '· ' : ''}
-                          {amount} {ing.name}
-                          {ingredientShowsAdjustToTasteHint(ing) ? '  ⚠ adjust to taste' : ''}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))
-            : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Method section"
-            accessibilityState={{ expanded: showMethod }}
-            onPress={() => setShowMethod((v) => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
-          >
-            <Ionicons
-              name={showMethod ? 'chevron-down' : 'chevron-forward'}
-              size={16}
-              color={colors.textPrimary}
-            />
-            <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-              Method
-            </Text>
-          </Pressable>
-          {(readMode || showMethod)
-            ? [...recipe.steps]
-            .sort((a, b) => a.order - b.order)
-            .map((s, idx) => (
-              <View key={s.id} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View
-                    style={{
-                      minWidth: 28,
-                      height: 28,
-                      borderRadius: 14,
-                      backgroundColor: colors.primary,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>{idx + 1}</Text>
-                  </View>
-                  <Text
-                    style={{
-                      flex: 1,
-                      fontFamily: readMode ? 'DMSans_500Medium' : 'DMSans_400Regular',
-                      color: colors.textPrimary,
-                      fontSize: readMode ? 17 : 15,
-                      lineHeight: readMode ? 28 : 22,
-                    }}
-                  >
-                    {renderStepInstruction(s, recipe.baseServings, servings)}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6, marginLeft: 38 }}>
-                  {extractStepTimerPresets(s.instruction).map((preset) => (
-                    <Pressable
-                      key={preset.key}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Start ${preset.label} timer for step ${idx + 1}`}
-                      onPress={() => void startStepTimer(s.id, `Step ${idx + 1} · ${preset.label}`, preset.seconds)}
-                      style={{
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        backgroundColor: colors.surface,
-                        borderRadius: 999,
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                      }}
-                    >
-                      <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium', fontSize: 12 }}>
-                        Start {preset.label} timer
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ))
-            : null}
-          {!readMode ? (
-            <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Cook journal section"
-                accessibilityState={{ expanded: showCookJournal }}
-                onPress={() => setShowCookJournal((v) => !v)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
-              >
-                <Ionicons
-                  name={showCookJournal ? 'chevron-down' : 'chevron-forward'}
-                  size={16}
-                  color={colors.textPrimary}
+
+            <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+              <Chip
+                label="Checklist"
+                icon={checklistMode ? 'checkbox' : 'checkbox-outline'}
+                active={checklistMode}
+                accessibilityLabel="Checklist mode"
+                accessibilityHint="Lets you tick off ingredients as you go"
+                onPress={() => setChecklistMode((v) => !v)}
+              />
+              {checklistMode ? (
+                <Chip
+                  label="Reset checks"
+                  icon="refresh-outline"
+                  accessibilityLabel="Clear ticked ingredients"
+                  accessibilityHint="Unticks every ingredient"
+                  onPress={() => setCheckedIngredientIds([])}
                 />
-                <Text style={{ fontFamily: 'DMSans_700Bold', color: colors.textPrimary }}>
-                  Cook journal
+              ) : null}
+            </View>
+
+            <Card level={1} style={{ gap: space.xs }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                }}
+              >
+                <Text variant="overline" tone="secondary">
+                  Serves
                 </Text>
-              </Pressable>
-              {showCookJournal ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-                  {recipe.cookLogs.map((log) => (
-                    <View key={log.id} style={{ width: 120 }}>
-                      <Pressable
-                        accessibilityRole={log.photoUri ? 'imagebutton' : 'button'}
-                        accessibilityLabel={
-                          log.photoUri
-                            ? `Cook photo from ${new Date(log.cookedAt).toLocaleDateString()}`
-                            : `Cook log from ${new Date(log.cookedAt).toLocaleDateString()}`
-                        }
-                        onPress={() => (log.photoUri ? setFullscreenImageUri(log.photoUri) : router.push(`/cook-log/${log.id}`))}
-                      >
-                        {log.photoUri ? (
-                          <Image source={{ uri: log.photoUri }} style={{ width: 120, height: 120, borderRadius: 14 }} />
-                        ) : (
+                <Text variant="title" tone="accent">
+                  {Math.round(servings)}
+                </Text>
+              </View>
+              <Slider
+                accessibilityLabel="Servings"
+                minimumValue={1}
+                maximumValue={sliderMax}
+                step={1}
+                value={servings}
+                onSlidingStart={() => {
+                  isSlidingRef.current = true;
+                }}
+                onValueChange={(value) => {
+                  if (!isSlidingRef.current) {
+                    return;
+                  }
+                  const now = Date.now();
+                  if (!shouldCommitSliderTick(lastSliderCommitAtRef.current, now)) {
+                    return;
+                  }
+                  lastSliderCommitAtRef.current = now;
+                  const nextServings = normalizeServings(value, sliderMax);
+                  setServings(nextServings);
+                }}
+                onSlidingComplete={(value) => {
+                  isSlidingRef.current = false;
+                  lastSliderCommitAtRef.current = Date.now();
+                  const nextServings = normalizeServings(value, sliderMax);
+                  setServings(nextServings);
+                  void setRecipeServingsOverride(recipe.id, nextServings);
+                }}
+                minimumTrackTintColor={colors.primary}
+                maximumTrackTintColor={colors.borderStrong}
+                thumbTintColor={colors.primary}
+              />
+            </Card>
+
+            <SectionToggle
+              label="Ingredients"
+              open={showIngredients}
+              onToggle={() => setShowIngredients((v) => !v)}
+              accessibilityLabel="Ingredients section"
+              colors={colors}
+            />
+            {readMode || showIngredients
+              ? ingredientSections.map((section, sectionIdx) => (
+                  <View
+                    key={`section-${section.title ?? 'default'}-${sectionIdx}`}
+                    style={{ gap: space.xs }}
+                  >
+                    {section.title ? (
+                      <Text variant="overline" tone="secondary" style={{ marginTop: space.sm }}>
+                        {section.title}
+                      </Text>
+                    ) : null}
+                    {section.ingredients.map((ing) => {
+                      const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
+                      const checked = checkedIngredientIds.includes(ing.id);
+                      const needsTasteHint = ingredientShowsAdjustToTasteHint(ing);
+                      return (
+                        <Pressable
+                          key={ing.id}
+                          accessibilityRole={checklistMode ? 'checkbox' : 'text'}
+                          accessibilityLabel={`${amount} ${ing.name}`}
+                          accessibilityState={checklistMode ? { checked } : undefined}
+                          accessibilityHint={
+                            checklistMode ? 'Ticks this ingredient off' : undefined
+                          }
+                          disabled={!checklistMode}
+                          onPress={() => {
+                            if (checklistMode) {
+                              toggleIngredientChecked(ing.id);
+                            }
+                          }}
+                          android_ripple={checklistMode ? ripple(colors.ripple) : undefined}
+                          style={({ pressed }) => [
+                            {
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: space.sm,
+                              // Checklist rows are tap targets, so they get real
+                              // height; the read-only list stays compact.
+                              minHeight: checklistMode ? 40 : undefined,
+                              paddingVertical: checklistMode ? 0 : space.xxs,
+                              borderRadius: radius.sm,
+                            },
+                            checklistMode ? pressedStyle(pressed) : undefined,
+                          ]}
+                        >
+                          {checklistMode ? (
+                            <Ionicons
+                              name={checked ? 'checkbox' : 'square-outline'}
+                              size={20}
+                              color={checked ? colors.primary : colors.textSecondary}
+                            />
+                          ) : (
+                            <View
+                              style={{
+                                width: 4,
+                                height: 4,
+                                borderRadius: 2,
+                                backgroundColor: colors.textSecondary,
+                              }}
+                            />
+                          )}
+                          <Text
+                            variant={readMode ? 'bodyStrong' : 'body'}
+                            tone={checked ? 'secondary' : 'primary'}
+                            style={[
+                              readMode ? READ_MODE_BODY : null,
+                              {
+                                flex: 1,
+                                textDecorationLine: checked ? 'line-through' : 'none',
+                              },
+                            ]}
+                          >
+                            {amount} {ing.name}
+                          </Text>
+                          {needsTasteHint ? (
+                            <Text
+                              variant="caption"
+                              tone="secondary"
+                              accessibilityLabel="Adjust to taste"
+                            >
+                              ⚠ to taste
+                            </Text>
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))
+              : null}
+
+            <SectionToggle
+              label="Method"
+              open={showMethod}
+              onToggle={() => setShowMethod((v) => !v)}
+              accessibilityLabel="Method section"
+              colors={colors}
+            />
+            {readMode || showMethod
+              ? [...recipe.steps]
+                  .sort((a, b) => a.order - b.order)
+                  .map((s, idx) => {
+                    const presets = extractStepTimerPresets(s.instruction);
+                    return (
+                      <View key={s.id} style={{ gap: space.sm }}>
+                        <View style={{ flexDirection: 'row', gap: space.md }}>
                           <View
                             style={{
-                              width: 120,
-                              height: 120,
-                              borderRadius: 14,
-                              backgroundColor: colors.border,
+                              minWidth: 26,
+                              height: 26,
+                              borderRadius: radius.pill,
+                              backgroundColor: colors.primaryFill,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              marginTop: space.xxs,
                             }}
-                          />
-                        )}
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open cook log from ${new Date(log.cookedAt).toLocaleDateString()}`}
-                        onPress={() => router.push(`/cook-log/${log.id}`)}
-                      >
-                        <Text style={{ marginTop: 6, color: colors.textSecondary, fontFamily: 'DMSans_400Regular' }} numberOfLines={1}>
-                          {new Date(log.cookedAt).toLocaleDateString()}
-                          {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
-                        </Text>
-                        {log.notes ? (
-                          <Text
-                            style={{
-                              marginTop: 4,
-                              color: colors.textPrimary,
-                              fontFamily: 'DMSans_400Regular',
-                              fontSize: 12,
-                              lineHeight: 16,
-                            }}
-                            numberOfLines={3}
                           >
-                            {log.notes}
+                            <Text variant="captionStrong" tone="onAccent">
+                              {idx + 1}
+                            </Text>
+                          </View>
+                          <Text
+                            variant={readMode ? 'bodyStrong' : 'body'}
+                            style={[readMode ? READ_MODE_BODY : null, { flex: 1 }]}
+                          >
+                            {renderStepInstruction(s, recipe.baseServings, servings)}
                           </Text>
+                        </View>
+                        {presets.length > 0 ? (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              gap: space.sm,
+                              flexWrap: 'wrap',
+                              marginLeft: 26 + space.md,
+                            }}
+                          >
+                            {presets.map((preset) => (
+                              <Chip
+                                key={preset.key}
+                                label={preset.label}
+                                icon="timer-outline"
+                                accessibilityLabel={`Start ${preset.label} timer for step ${idx + 1}`}
+                                accessibilityHint="Starts a countdown timer"
+                                onPress={() =>
+                                  void startStepTimer(
+                                    s.id,
+                                    `Step ${idx + 1} · ${preset.label}`,
+                                    preset.seconds
+                                  )
+                                }
+                              />
+                            ))}
+                          </View>
                         ) : null}
-                      </Pressable>
-                      {log.photoUri ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Set this photo as the recipe hero image"
-                          onPress={async () => {
-                            await setRecipeMainImageFromCookLog(recipe.id, log.id);
-                            await reload();
-                          }}
-                        >
-                          <Text
-                            style={{
-                              marginTop: 4,
-                              color: colors.primary,
-                              fontFamily: 'DMSans_500Medium',
-                              fontSize: 12,
-                            }}
-                          >
-                            Set as hero
-                          </Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : null}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_500Medium' }}>Cook rating</Text>
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <Pressable
-                    key={value}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Rate ${value} out of 5`}
-                    accessibilityState={{ selected: ratingDraft !== null && value <= ratingDraft }}
-                    onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
+                      </View>
+                    );
+                  })
+              : null}
+
+            {!readMode ? (
+              <>
+                <SectionToggle
+                  label="Cook journal"
+                  open={showCookJournal}
+                  onToggle={() => setShowCookJournal((v) => !v)}
+                  accessibilityLabel="Cook journal section"
+                  colors={colors}
+                />
+                {showCookJournal && recipe.cookLogs.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: space.md, paddingBottom: space.xs }}
                   >
-                    <Ionicons
-                      name={ratingDraft !== null && value <= ratingDraft ? 'star' : 'star-outline'}
-                      size={18}
-                      color={ratingDraft !== null && value <= ratingDraft ? '#FFD166' : colors.textSecondary}
-                    />
-                  </Pressable>
-                ))}
-              </View>
-              {pendingAdjustments.length > 0 ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Review ${pendingAdjustments.length} pending recipe updates`}
-                  onPress={() =>
-                    router.push(`/recipe/adjustments/${pendingAdjustments[0].id}`)
-                  }
-                  style={{
-                    borderWidth: 1,
-                    borderColor: colors.primary,
-                    borderRadius: 12,
-                    backgroundColor: colors.primary + '1A',
-                    padding: 10,
-                  }}
-                >
-                  <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>
-                    Review pending updates ({pendingAdjustments.length})
+                    {recipe.cookLogs.map((log) => {
+                      const cookedOn = new Date(log.cookedAt).toLocaleDateString();
+                      return (
+                        <View key={log.id} style={{ width: 132, gap: space.xs }}>
+                          <Pressable
+                            accessibilityRole={log.photoUri ? 'imagebutton' : 'button'}
+                            accessibilityLabel={
+                              log.photoUri
+                                ? `Cook photo from ${cookedOn}`
+                                : `Cook log from ${cookedOn}`
+                            }
+                            onPress={() =>
+                              log.photoUri
+                                ? setFullscreenImageUri(log.photoUri)
+                                : router.push(`/cook-log/${log.id}`)
+                            }
+                            style={({ pressed }) => pressedStyle(pressed, 0.85)}
+                          >
+                            {log.photoUri ? (
+                              <Image
+                                source={{ uri: log.photoUri }}
+                                style={{
+                                  width: 132,
+                                  height: 132,
+                                  borderRadius: radius.md,
+                                }}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View
+                                style={{
+                                  width: 132,
+                                  height: 132,
+                                  borderRadius: radius.md,
+                                  backgroundColor: colors.surfaceMuted,
+                                  borderWidth: 1,
+                                  borderColor: colors.border,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <Ionicons
+                                  name="document-text-outline"
+                                  size={26}
+                                  color={colors.textSecondary}
+                                />
+                              </View>
+                            )}
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open cook log from ${cookedOn}`}
+                            onPress={() => router.push(`/cook-log/${log.id}`)}
+                            style={({ pressed }) => [{ gap: space.xxs }, pressedStyle(pressed)]}
+                          >
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {cookedOn}
+                              {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
+                            </Text>
+                            {log.notes ? (
+                              <Text variant="caption" numberOfLines={3}>
+                                {log.notes}
+                              </Text>
+                            ) : null}
+                          </Pressable>
+                          {log.photoUri ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel="Set this photo as the recipe hero image"
+                              onPress={async () => {
+                                await setRecipeMainImageFromCookLog(recipe.id, log.id);
+                                await reload();
+                              }}
+                              hitSlop={8}
+                              style={({ pressed }) => pressedStyle(pressed)}
+                            >
+                              <Text variant="caption" tone="accent">
+                                Set as hero
+                              </Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                ) : null}
+
+                <Card level={0} style={{ gap: space.md }}>
+                  <Text variant="overline" tone="secondary">
+                    Log a cook
                   </Text>
-                </Pressable>
-              ) : null}
-              <TextInput
-                accessibilityLabel="Notes for this cook"
-                placeholder="Notes for this cook (optional)"
-                placeholderTextColor={colors.textSecondary}
-                value={noteDraft}
-                onChangeText={setNoteDraft}
-                onFocus={() => {
-                  scrollFocusedInputIntoView();
-                }}
-                style={{
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  borderRadius: 12,
-                  padding: 12,
-                  fontFamily: 'DMSans_400Regular',
-                  color: colors.textPrimary,
-                  backgroundColor: colors.surface,
-                }}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={isLoggingCook ? 'Saving cook log' : 'Log this cook'}
-                accessibilityState={{ disabled: isLoggingCook, busy: isLoggingCook }}
-                disabled={isLoggingCook}
-                onPress={logCook}
-                style={{
-                  backgroundColor: colors.primary,
-                  padding: 14,
-                  borderRadius: 14,
-                  alignItems: 'center',
-                  opacity: isLoggingCook ? 0.7 : 1,
-                }}
-              >
-                {isLoggingCook ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={{ color: '#fff', fontFamily: 'DMSans_700Bold' }}>Log this cook</Text>
-                )}
-              </Pressable>
-            </>
-          ) : null}
-        </View>
-      </ScrollView>
-      {aiEnabled ? (
-        <>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cooking assistant"
-            onPress={async () => {
-              const net = await NetInfo.fetch();
-              if (!net.isConnected) {
-                setDialog({
-                  title: 'Offline',
-                  message: 'Connect to use the assistant.',
-                  actions: [{ label: 'OK', variant: 'primary' }],
-                });
-                return;
-              }
-              const credentials = await getAiCredentials();
-              if (!credentials.ok) {
-                const { title, message } = describeAiUnavailable(
-                  credentials.reason,
-                  credentials.provider
+
+                  <View
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}
+                  >
+                    <Text variant="label" tone="secondary" style={{ flex: 1 }}>
+                      Rating
+                    </Text>
+                    {[1, 2, 3, 4, 5].map((value) => {
+                      const filled = ratingDraft !== null && value <= ratingDraft;
+                      return (
+                        <Pressable
+                          key={value}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Rate ${value} out of 5`}
+                          accessibilityState={{ selected: filled }}
+                          hitSlop={8}
+                          onPress={() => setRatingDraft((prev) => (prev === value ? null : value))}
+                          style={({ pressed }) => pressedStyle(pressed)}
+                        >
+                          <Ionicons
+                            name={filled ? 'star' : 'star-outline'}
+                            size={24}
+                            color={filled ? colors.star : colors.textSecondary}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <TextField
+                    accessibilityLabel="Notes for this cook"
+                    placeholder="Notes for this cook (optional)"
+                    multiline
+                    value={noteDraft}
+                    onChangeText={setNoteDraft}
+                    onFocus={() => {
+                      scrollFocusedInputIntoView();
+                    }}
+                  />
+
+                  <Button
+                    label="Log this cook"
+                    icon="add-circle-outline"
+                    fullWidth
+                    size="lg"
+                    loading={isLoggingCook}
+                    disabled={isLoggingCook}
+                    accessibilityLabel={isLoggingCook ? 'Saving cook log' : 'Log this cook'}
+                    onPress={logCook}
+                  />
+                </Card>
+
+                {pendingAdjustments.length > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Review ${pendingAdjustments.length} pending recipe updates`}
+                    onPress={() => router.push(`/recipe/adjustments/${pendingAdjustments[0].id}`)}
+                    android_ripple={ripple(colors.ripple)}
+                    style={({ pressed }) => [
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: space.md,
+                        borderWidth: 1,
+                        borderColor: colors.primary,
+                        borderRadius: radius.md,
+                        backgroundColor: colors.primarySoft,
+                        padding: space.lg,
+                        overflow: 'hidden',
+                      },
+                      pressedStyle(pressed),
+                    ]}
+                  >
+                    <Ionicons name="sparkles" size={18} color={colors.onPrimarySoft} />
+                    <Text variant="bodyStrong" tone="onAccentSoft" style={{ flex: 1 }}>
+                      Review pending updates ({pendingAdjustments.length})
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.onPrimarySoft} />
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+        </ScrollView>
+
+        {aiEnabled ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cooking assistant"
+              accessibilityHint="Opens a chat scoped to this recipe"
+              onPress={async () => {
+                const net = await NetInfo.fetch();
+                if (!net.isConnected) {
+                  setDialog({
+                    title: 'Offline',
+                    message: 'Connect to use the assistant.',
+                    actions: [{ label: 'OK', variant: 'primary' }],
+                  });
+                  return;
+                }
+                const credentials = await getAiCredentials();
+                if (!credentials.ok) {
+                  const { title, message } = describeAiUnavailable(
+                    credentials.reason,
+                    credentials.provider
+                  );
+                  setDialog({
+                    title,
+                    message,
+                    actions: [{ label: 'OK', variant: 'primary' }],
+                  });
+                  return;
+                }
+                sheetRef.current?.present(
+                  recipe,
+                  servings,
+                  credentials.provider,
+                  credentials.apiKey
                 );
-                setDialog({
-                  title,
-                  message,
-                  actions: [{ label: 'OK', variant: 'primary' }],
-                });
-                return;
-              }
-              sheetRef.current?.present(
-                recipe,
-                servings,
-                credentials.provider,
-                credentials.apiKey
-              );
-            }}
+              }}
+              android_ripple={ripple(colors.rippleOnFill, true)}
+              style={({ pressed }) => [
+                {
+                  position: 'absolute',
+                  right: space.xl,
+                  // Clears the timer bar when one is running, so the two never
+                  // stack on top of each other.
+                  bottom: insets.bottom + space.xl + (activeTimer ? 76 : 0),
+                  width: 56,
+                  height: 56,
+                  borderRadius: radius.pill,
+                  backgroundColor: colors.primaryFill,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  ...elevation(3, resolved),
+                },
+                pressedStyle(pressed, 0.9),
+              ]}
+            >
+              <Ionicons
+                name="chatbubble-ellipses"
+                size={24}
+                color={colors.onPrimaryFill}
+              />
+            </Pressable>
+            <RecipeChatSheet ref={sheetRef} />
+          </>
+        ) : null}
+
+        {activeTimer ? (
+          <View
+            accessible
+            accessibilityLabel={`Active timer: ${activeTimer.label}, ${formatTimerRemaining(
+              activeTimer.remainingSeconds
+            )} remaining`}
             style={{
               position: 'absolute',
-              right: 20,
-              bottom: 20 + insets.bottom,
-              width: 52,
-              height: 52,
-              borderRadius: 26,
+              left: space.lg,
+              right: space.lg,
+              bottom: insets.bottom + space.md,
+              borderRadius: radius.md,
               borderWidth: 1,
               borderColor: colors.border,
               backgroundColor: colors.surface,
+              paddingHorizontal: space.lg,
+              paddingVertical: space.md,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.md,
+              ...elevation(3, resolved),
+            }}
+          >
+            <Ionicons name="timer-outline" size={20} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text variant="overline" tone="secondary">
+                Active timer
+              </Text>
+              <Text variant="bodyStrong" numberOfLines={1}>
+                {activeTimer.label} · {formatTimerRemaining(activeTimer.remainingSeconds)}
+              </Text>
+            </View>
+            <IconButton
+              icon={activeTimer.isPaused ? 'play' : 'pause'}
+              accessibilityLabel={activeTimer.isPaused ? 'Resume timer' : 'Pause timer'}
+              variant="accent"
+              size={36}
+              onPress={() =>
+                setActiveTimer((current) => {
+                  if (!current) return current;
+                  if (current.isPaused) {
+                    return {
+                      ...current,
+                      isPaused: false,
+                      endsAtMs: Date.now() + current.remainingSeconds * 1000,
+                    };
+                  }
+                  const remainingSeconds = current.endsAtMs
+                    ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
+                    : current.remainingSeconds;
+                  return {
+                    ...current,
+                    remainingSeconds,
+                    isPaused: true,
+                    endsAtMs: null,
+                  };
+                })
+              }
+            />
+            <IconButton
+              icon="stop"
+              accessibilityLabel="Stop timer"
+              variant="ghost"
+              size={36}
+              onPress={() => setActiveTimer(null)}
+              style={{ backgroundColor: colors.destructiveSoft }}
+            />
+          </View>
+        ) : null}
+
+        <ConfirmDialog
+          visible={showArchiveRecipeConfirm}
+          title={recipe.isArchived ? 'Unarchive recipe?' : 'Archive recipe?'}
+          message={
+            recipe.isArchived
+              ? 'This recipe will return to your active library.'
+              : 'Archived recipes are hidden from your active library.'
+          }
+          confirmLabel={recipe.isArchived ? 'Unarchive' : 'Archive'}
+          destructive={!recipe.isArchived}
+          onCancel={() => setShowArchiveRecipeConfirm(false)}
+          onConfirm={async () => {
+            setShowArchiveRecipeConfirm(false);
+            const previousArchived = recipe.isArchived;
+            const nextArchived = !previousArchived;
+            await setRecipeArchived(recipe.id, nextArchived);
+            setRecipe({ ...recipe, isArchived: nextArchived });
+            setDialog({
+              title: nextArchived ? 'Recipe archived' : 'Recipe unarchived',
+              message: nextArchived
+                ? 'This recipe is hidden from your active library.'
+                : 'This recipe is back in your active library.',
+              actions: [
+                {
+                  label: 'Undo',
+                  onPress: async () => {
+                    await setRecipeArchived(recipe.id, previousArchived);
+                    setRecipe((current) =>
+                      current ? { ...current, isArchived: previousArchived } : current
+                    );
+                  },
+                },
+                { label: 'OK', variant: 'primary' },
+              ],
+            });
+          }}
+        />
+        <AppDialog
+          visible={dialog !== null}
+          title={dialog?.title ?? ''}
+          message={dialog?.message ?? ''}
+          actions={dialog?.actions ?? []}
+          onClose={() => setDialog(null)}
+        />
+        <FullscreenImageViewer
+          imageUri={fullscreenImageUri}
+          onClose={() => setFullscreenImageUri(null)}
+        />
+
+        {isLoggingCook ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: colors.scrim,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.textPrimary} />
-          </Pressable>
-          <RecipeChatSheet ref={sheetRef} />
-        </>
-      ) : null}
-      {activeTimer ? (
-        <View
-          style={{
-            position: 'absolute',
-            left: 16,
-            right: 16,
-            bottom: insets.bottom + 14,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor: colors.surface,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.textSecondary, fontFamily: 'DMSans_400Regular', fontSize: 12 }}>
-              Active timer
-            </Text>
-            <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_700Bold' }}>
-              {activeTimer.label} · {formatTimerRemaining(activeTimer.remainingSeconds)}
-            </Text>
+            <View
+              style={{
+                backgroundColor: colors.surface,
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderColor: colors.border,
+                paddingHorizontal: space.lg,
+                paddingVertical: space.md,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.md,
+                ...elevation(3, resolved),
+              }}
+            >
+              <ActivityIndicator color={colors.primary} />
+              <Text variant="body">Logging cook…</Text>
+            </View>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={activeTimer.isPaused ? 'Resume timer' : 'Pause timer'}
-            onPress={() =>
-              setActiveTimer((current) => {
-                if (!current) return current;
-                if (current.isPaused) {
-                  return {
-                    ...current,
-                    isPaused: false,
-                    endsAtMs: Date.now() + current.remainingSeconds * 1000,
-                  };
-                }
-                const remainingSeconds = current.endsAtMs
-                  ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
-                  : current.remainingSeconds;
-                return {
-                  ...current,
-                  remainingSeconds,
-                  isPaused: true,
-                  endsAtMs: null,
-                };
-              })
-            }
-          >
-            <Text style={{ color: colors.primary, fontFamily: 'DMSans_700Bold' }}>
-              {activeTimer.isPaused ? 'Resume' : 'Pause'}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Stop timer"
-            onPress={() => setActiveTimer(null)}
-          >
-            <Text style={{ color: colors.destructive, fontFamily: 'DMSans_700Bold' }}>Stop</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      <ConfirmDialog
-        visible={showArchiveRecipeConfirm}
-        title={recipe.isArchived ? 'Unarchive recipe?' : 'Archive recipe?'}
-        message={
-          recipe.isArchived
-            ? 'This recipe will return to your active library.'
-            : 'Archived recipes are hidden from your active library.'
-        }
-        confirmLabel={recipe.isArchived ? 'Unarchive' : 'Archive'}
-        destructive={!recipe.isArchived}
-        onCancel={() => setShowArchiveRecipeConfirm(false)}
-        onConfirm={async () => {
-          setShowArchiveRecipeConfirm(false);
-          const previousArchived = recipe.isArchived;
-          const nextArchived = !previousArchived;
-          await setRecipeArchived(recipe.id, nextArchived);
-          setRecipe({ ...recipe, isArchived: nextArchived });
-          setDialog({
-            title: nextArchived ? 'Recipe archived' : 'Recipe unarchived',
-            message: nextArchived
-              ? 'This recipe is hidden from your active library.'
-              : 'This recipe is back in your active library.',
-            actions: [
-              {
-                label: 'Undo',
-                onPress: async () => {
-                  await setRecipeArchived(recipe.id, previousArchived);
-                  setRecipe((current) =>
-                    current ? { ...current, isArchived: previousArchived } : current
-                  );
-                },
-              },
-              { label: 'OK', variant: 'primary' },
-            ],
-          });
-        }}
-      />
-      <AppDialog
-        visible={dialog !== null}
-        title={dialog?.title ?? ''}
-        message={dialog?.message ?? ''}
-        actions={dialog?.actions ?? []}
-        onClose={() => setDialog(null)}
-      />
-      <FullscreenImageViewer
-        imageUri={fullscreenImageUri}
-        onClose={() => setFullscreenImageUri(null)}
-      />
-      {isLoggingCook ? (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: '#0000001A',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-            }}
-          >
-            <ActivityIndicator color={colors.primary} />
-            <Text style={{ color: colors.textPrimary, fontFamily: 'DMSans_500Medium' }}>
-              Logging cook...
-            </Text>
-          </View>
-        </View>
-      ) : null}
-    </View>
+        ) : null}
+      </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Collapsible group heading shared by the ingredients, method and journal blocks. */
+function SectionToggle({
+  label,
+  open,
+  onToggle,
+  accessibilityLabel,
+  colors,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  accessibilityLabel: string;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ expanded: open }}
+      onPress={onToggle}
+      style={({ pressed }) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          minHeight: 44,
+          marginTop: space.sm,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
+          paddingBottom: space.sm,
+        },
+        pressedStyle(pressed),
+      ]}
+    >
+      <Text variant="heading" style={{ flex: 1 }}>
+        {label}
+      </Text>
+      <Ionicons
+        name={open ? 'chevron-up' : 'chevron-down'}
+        size={18}
+        color={colors.textSecondary}
+      />
+    </Pressable>
   );
 }
