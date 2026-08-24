@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FAF8F5"
+        "backgroundColor": "#CA6342"
       },
       "package": "com.mise.app",
       "permissions": [
