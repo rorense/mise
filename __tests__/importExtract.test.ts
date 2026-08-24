@@ -303,3 +303,144 @@ describe('import method validation', () => {
     ).toBe(false);
   });
 });
+
+describe('parseRecipeJson unit handling', () => {
+  const recipeWith = (
+    ingredients: unknown[],
+    steps: unknown[] = [
+      { instruction: 'Bake for 45 minutes until golden and firm.' },
+    ]
+  ) =>
+    parseRecipeJson(
+      JSON.stringify({
+        title: 'US Recipe',
+        baseServings: 4,
+        cuisine: null,
+        tags: [],
+        ingredients,
+        steps,
+      })
+    );
+
+  it('converts the imperial amounts the model reported verbatim', () => {
+    const parsed = recipeWith([
+      {
+        quantity: 8,
+        unit: 'oz',
+        name: 'cream cheese',
+        notes: null,
+        scalable: true,
+        amountMode: 'exact',
+      },
+      {
+        quantity: 1,
+        unit: 'lb',
+        name: 'beef mince',
+        notes: null,
+        scalable: true,
+        amountMode: 'exact',
+      },
+      {
+        quantity: 2,
+        unit: 'cups',
+        name: 'flour',
+        notes: null,
+        scalable: true,
+        amountMode: 'exact',
+      },
+    ]);
+
+    expect(parsed?.ingredients[0]).toMatchObject({ quantity: 225, unit: 'g' });
+    expect(parsed?.ingredients[1]).toMatchObject({ quantity: 455, unit: 'g' });
+    // Cup measures are what the source said and what the cook will use.
+    expect(parsed?.ingredients[2]).toMatchObject({ quantity: 2, unit: 'cups' });
+  });
+
+  it('keeps a to-taste row instead of discarding the whole recipe over it', () => {
+    const parsed = recipeWith([
+      {
+        quantity: 'to taste',
+        unit: null,
+        name: 'chilli flakes',
+        notes: null,
+        scalable: false,
+        amountMode: 'to_taste',
+      },
+    ]);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.ingredients[0]).toMatchObject({
+      quantity: 0,
+      unit: null,
+      name: 'chilli flakes',
+      amountMode: 'to_taste',
+    });
+  });
+
+  it('still rejects an exact row with no readable quantity', () => {
+    expect(
+      recipeWith([
+        {
+          quantity: 'some',
+          unit: 'g',
+          name: 'flour',
+          notes: null,
+          scalable: true,
+          amountMode: 'exact',
+        },
+      ])
+    ).toBeNull();
+  });
+
+  it('moves a step placeholder unit along with its number', () => {
+    const parsed = recipeWith(
+      [
+        {
+          quantity: 8,
+          unit: 'oz',
+          name: 'flour',
+          notes: null,
+          scalable: true,
+          amountMode: 'exact',
+        },
+      ],
+      [
+        {
+          instruction: 'Whisk {{qty_1}} oz flour into the butter and cook for 2 minutes.',
+          scalableQuantities: [
+            { placeholder: '{{qty_1}}', baseQuantity: 8, unit: 'oz' },
+          ],
+        },
+      ]
+    );
+
+    expect(parsed?.steps[0].instruction).toBe(
+      'Whisk {{qty_1}} g flour into the butter and cook for 2 minutes.'
+    );
+    expect(parsed?.steps[0].scalableQuantities[0]).toEqual({
+      placeholder: '{{qty_1}}',
+      baseQuantity: 225,
+      unit: 'g',
+    });
+  });
+
+  it('converts fahrenheit left in a step instruction', () => {
+    const parsed = recipeWith(
+      [
+        {
+          quantity: 200,
+          unit: 'g',
+          name: 'flour',
+          notes: null,
+          scalable: true,
+          amountMode: 'exact',
+        },
+      ],
+      [{ instruction: 'Bake at 350°F for 45 minutes in a 9-inch tin.' }]
+    );
+
+    expect(parsed?.steps[0].instruction).toBe(
+      'Bake at 175°C for 45 minutes in a 23 cm tin.'
+    );
+  });
+});

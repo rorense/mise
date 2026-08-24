@@ -1,6 +1,6 @@
 import { Button, Chip, Text } from '@/components/ui';
 import { recipeToChatSystemPrompt } from '@/lib/chatPrompt';
-import { llmCompletion, type LlmMessage } from '@/lib/llm';
+import { llmCompletion } from '@/lib/llm';
 import type { AiProvider } from '@/lib/secrets';
 import { useTheme } from '@/theme/ThemeContext';
 import { radius, space, typeScale } from '@/theme/tokens';
@@ -34,12 +34,18 @@ export type RecipeChatSheetRef = {
 /** Height of the pinned composer, so the scroll area can clear it. */
 const COMPOSER_HEIGHT = 108;
 
+/** One rendered bubble. Assignable to LlmMessage, but never multimodal. */
+type ChatTurn = { role: 'user' | 'assistant'; content: string };
+
 export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeChatSheet(_, ref) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const modalRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%', '90%'], []);
-  const [messages, setMessages] = useState<LlmMessage[]>([]);
+  // Narrower than LlmMessage on purpose: these turns are rendered straight into
+  // a bubble, so this surface only ever holds text. It stays assignable to
+  // LlmMessage, so the history still passes to llmCompletion unchanged.
+  const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const keyRef = useRef('');
@@ -70,7 +76,7 @@ export const RecipeChatSheet = forwardRef<RecipeChatSheetRef>(function RecipeCha
     // replies append out of order.
     if (!trimmed || !ctx || busy) return;
     const sys = recipeToChatSystemPrompt(ctx.recipe, ctx.servings);
-    const nextUser: LlmMessage = { role: 'user', content: trimmed };
+    const nextUser: ChatTurn = { role: 'user', content: trimmed };
     const history = [...messages, nextUser].slice(-20);
     setMessages([...messages, nextUser]);
     setInput('');

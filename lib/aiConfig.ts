@@ -5,6 +5,13 @@ import {
   type AiProvider,
 } from '@/lib/secrets';
 
+/** One place to spell each provider's name for anything user-facing. */
+export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  anthropic: 'Claude',
+};
+
 export async function getActiveAiProvider(): Promise<AiProvider> {
   return getAiProvider();
 }
@@ -32,6 +39,29 @@ export async function getAiCredentials(): Promise<AiCredentials> {
   return { ok: true, provider, apiKey };
 }
 
+/**
+ * Recipe import is the one place a wrong answer gets saved and cooked from
+ * months later, and it is the hardest thing the app asks a model to do — read a
+ * whole page, or a photograph of one, and lose nothing. Claude is used for it
+ * whenever a key is stored, regardless of which provider drives chat, and the
+ * chosen provider is the fallback rather than the default.
+ */
+export async function getImportAiCredentials(): Promise<AiCredentials> {
+  const provider = await getAiProvider();
+  if (!(await getAiEnabled())) {
+    return { ok: false, reason: 'disabled', provider };
+  }
+  const anthropicKey = await getAiApiKey('anthropic');
+  if (anthropicKey) {
+    return { ok: true, provider: 'anthropic', apiKey: anthropicKey };
+  }
+  const apiKey = await getAiApiKey(provider);
+  if (!apiKey) {
+    return { ok: false, reason: 'missing-key', provider };
+  }
+  return { ok: true, provider, apiKey };
+}
+
 export function describeAiUnavailable(
   reason: AiUnavailableReason,
   provider: AiProvider
@@ -44,8 +74,6 @@ export function describeAiUnavailable(
   }
   return {
     title: 'No API key',
-    message: `Add your ${
-      provider === 'gemini' ? 'Gemini' : 'OpenAI'
-    } API key in Settings to use this.`,
+    message: `Add your ${AI_PROVIDER_LABEL[provider]} API key in Settings to use this.`,
   };
 }

@@ -16,7 +16,7 @@ import {
   saveRecipe,
 } from '@/data/recipes';
 import { formatQuantity, isIngredientSectionHeading } from '@/domain/scaling';
-import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
+import { describeAiUnavailable, getImportAiCredentials } from '@/lib/aiConfig';
 import { newId } from '@/lib/id';
 import { importFromManualText } from '@/lib/import/pipeline';
 import { restoreImportDraft, takeImportDraft } from '@/lib/importDraftStore';
@@ -309,7 +309,7 @@ export default function RecipeFormScreen() {
       });
       return;
     }
-    const credentials = await getAiCredentials();
+    const credentials = await getImportAiCredentials();
     if (!credentials.ok) {
       setDialog(describeAiUnavailable(credentials.reason, credentials.provider));
       return;

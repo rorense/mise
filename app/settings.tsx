@@ -19,6 +19,7 @@ import {
   type BackupSummary,
 } from '@/data/backup';
 import { cleanupUnusedMediaFiles } from '@/data/recipes';
+import { AI_PROVIDER_LABEL } from '@/lib/aiConfig';
 import { estimateAppStorageBytes, formatBytes } from '@/lib/media';
 import {
   deleteAiApiKey,
@@ -40,11 +41,6 @@ import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
 import { Switch, View } from 'react-native';
-
-const PROVIDER_LABEL: Record<AiProvider, string> = {
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-};
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
@@ -173,7 +169,7 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  const providerName = PROVIDER_LABEL[aiProvider];
+  const providerName = AI_PROVIDER_LABEL[aiProvider];
 
   return (
     <Screen scroll header={{ title: 'Settings', back: true }} gap={space.xxl}>
@@ -219,6 +215,7 @@ export default function SettingsScreen() {
               options={[
                 { value: 'openai', label: 'OpenAI' },
                 { value: 'gemini', label: 'Gemini' },
+                { value: 'anthropic', label: 'Claude' },
               ]}
               onChange={async (provider) => {
                 setAiProviderState(provider);
@@ -228,6 +225,11 @@ export default function SettingsScreen() {
                 setHasStoredKey((await getAiApiKey(provider)) !== null);
               }}
             />
+            <Text variant="caption" tone="secondary">
+              Recipe import always uses Claude when a Claude key is saved — it is
+              the most accurate at reading a whole page or a photo of one. Chat
+              and cook-note suggestions use the provider you pick here.
+            </Text>
           </View>
 
           <View style={{ gap: space.sm }}>

@@ -1,38 +1,107 @@
+import { EXTRACTION_TIMEOUT_MS, VISION_TIMEOUT_MS } from '@/lib/http';
 import { newId } from '@/lib/id';
-import { llmCompletion } from '@/lib/llm';
+import type { ScanImage } from '@/lib/import/scanImage';
+import {
+  convertIngredientAmount,
+  convertMeasurementsInText,
+} from '@/lib/import/units';
+import { llmCompletion, type LlmContentPart } from '@/lib/llm';
 import type { AiProvider } from '@/lib/secrets';
 import { isLikelySectionHeadingLabel } from '@/domain/scaling';
 import type { Ingredient, Recipe, SourceType, Step } from '@/types/recipe';
 
-const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified JSON matching this TypeScript shape (no markdown fences):
-{
+/** Extraction is transcription, so pay for care rather than for speed. */
+const EXTRACTION_EFFORT = 'high' as const;
+
+const SHAPE = `{
   "title": string,
   "baseServings": number,
   "cuisine": string | null,
   "tags": string[],
   "ingredients": { "quantity": number, "unit": string | null, "name": string, "notes": string | null, "scalable": boolean, "amountMode": "exact" | "to_taste", "section"?: string | null }[],
   "steps": { "instruction": string, "scalableQuantities"?: { "placeholder": string, "baseQuantity": number, "unit": string }[] }[]
-}
+}`;
 
-Rules:
-- Use only these units: g, kg, ml, l, cm, °C, cup, cups, tsp, tbsp, pinch. Never use imperial.
-- Preserve cup/cups/tsp/tbsp/pinch from the source when present; do NOT convert these to ml.
-- Convert other non-metric units to metric in the numbers you output.
-- Step instructions should be plain language without quantity placeholders, but still include timing, heat level, and doneness cues from the source in the step text.
-- For eggs, cloves, sprigs use unit null and round-friendly base quantities.
-- Default scalable to true for exact ingredients; only use scalable false for explicit non-scaling entries and heading rows.
-- Salt and pepper ingredients should always use amountMode "to_taste".
-- Use amountMode "to_taste" when an ingredient is by feel (e.g., chili flakes to taste). For "to_taste": quantity should be 0, unit should be null, and scalable should be false.
+const SYSTEM = `You are a recipe extraction engine. Output ONLY valid minified JSON matching this TypeScript shape (no markdown fences):
+${SHAPE}
+
+FIDELITY COMES FIRST. You are transcribing a recipe, not writing one. Never invent, improve, round, merge, reorder or drop anything the source states.
+- If the input contains a block marked "PUBLISHER RECIPE DATA (authoritative)", that block is the truth. Every ingredient line in it must appear exactly once in your output, and every method step in it must appear as its own step, in the same order. Use the surrounding page text only to fill in things the block does not cover.
+- Never merge two source ingredient lines into one row, and never split one into two.
+- Never merge two numbered method steps into one, and never renumber them.
+- If the source gives no servings, infer the most likely number and use it; never output 0.
+
+UNITS — do not do arithmetic.
+- Report the amount exactly as the source states it. The app converts to metric itself, correctly and consistently, so a conversion done here can only introduce an error.
+- Allowed unit values: g, kg, ml, l, cup, cups, tsp, tbsp, pinch, oz, fl oz, lb, pint, quart, gallon, or null.
+- Use null for countables: eggs, cloves, sprigs, slices, cans, sticks, whole items. Put the descriptor in "name" (e.g. name "garlic cloves", unit null, quantity 3).
+- A "stick" of butter is 113 g — output quantity 113 and unit "g" for that one case only. Cinnamon sticks, celery sticks and similar stay countable with unit null.
+- Write temperatures, oven settings, tin sizes and lengths in step text exactly as the source states them, including °F and inches. Do not convert them either.
+
+QUANTITIES
+- "quantity" must be a plain number. Convert written fractions to decimals only where they are genuinely fractional (1/2 -> 0.5).
+- A range ("2-3 tbsp") takes the lower number, with the full range text in "notes".
+- Use amountMode "to_taste" when an ingredient is by feel (e.g. chili flakes to taste). For "to_taste": quantity 0, unit null, scalable false.
+- Salt and pepper ingredients always use amountMode "to_taste".
+- Default scalable to true for exact ingredients; use scalable false only for explicit non-scaling entries and heading rows.
+- Keep preparation wording in "notes", not "name": "finely chopped", "at room temperature", "plus extra for dusting".
+
+SECTIONS
 - If ingredients are split into components/parts (e.g. "Sponge Cake", "Simple Syrup", "Whipping Cream"), set each ingredient item's "section" field to that component title.
 - If component headings appear as standalone lines, include them as dedicated heading rows with quantity: 0, unit: null, notes: null, scalable: false, amountMode: "exact".
 - Do NOT turn an ingredient into a heading just because quantity is unknown/missing. If unsure, keep it as an ingredient row.
+
+STEPS
+- Step instructions are plain language. Preserve every actionable detail the source gives: heat level, timing, temperature, pan size, mixing order, texture and visual cues, doneness checks, resting times.
+- Do not collapse multiple distinct actions into one vague line, and do not pad a step with detail the source never gave.
+- Avoid vague instructions like "cook until done" unless the source gives no better detail.
 - Where a step names an ingredient amount that should scale with servings, replace the number with a placeholder like {{qty_1}} (numbered per step) and list it in that step's scalableQuantities with its baseQuantity and unit. Keep the unit in the sentence: "Add {{qty_1}} g flour".
 - Do NOT use placeholders for anything that does not scale: times, temperatures, tin sizes, counts of equipment.
 - If a step has no scalable amount, set scalableQuantities to [].
-- Method quality is critical: keep steps specific and practical. Preserve actionable details from source text including heat level, timing, temperatures, texture/visual cues, mixing order, and doneness checks.
-- Do not collapse multiple distinct actions into vague single lines.
-- Avoid vague instructions like "cook until done" unless the source gives no better detail. Prefer concrete wording.
+
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
+
+/**
+ * The audit turn.
+ *
+ * A single extraction pass is confidently wrong often enough that the cook ends
+ * up correcting the saved recipe by hand, which is the thing this whole path
+ * exists to avoid. Re-reading the source against the draft catches the failures
+ * a re-run of the same prompt does not: a line silently dropped, two steps
+ * fused, a quantity attached to the wrong ingredient.
+ */
+const VERIFY_SYSTEM = `You are a recipe extraction auditor. You are given a SOURCE and a CANDIDATE JSON extraction of it. Find every discrepancy and output the corrected JSON.
+
+Output ONLY valid minified JSON in this shape (no markdown fences, no commentary):
+${SHAPE}
+
+Check, in this order:
+1. COVERAGE. Walk the source ingredient list top to bottom. Every line must appear exactly once in the candidate. Add anything missing. Remove anything the source does not contain.
+2. AMOUNTS. For each ingredient, re-read the source number and unit character by character. Fix wrong digits, decimal points, transposed values, and units attached to the wrong ingredient. Do not convert units — copy what the source says.
+3. NAMES AND NOTES. Preparation wording ("finely chopped", "softened", "divided") belongs in notes, not name. Restore anything dropped.
+4. STEPS. Walk the source method top to bottom. Every step must appear as its own step, in order, with nothing merged, dropped or reordered. Restore detail the candidate flattened away: timings, temperatures, heat levels, pan sizes, doneness cues.
+5. SERVINGS, title, cuisine and tags match the source.
+
+Rules for your output:
+- Same rules as the extraction: report units exactly as the source states them, allowed values g, kg, ml, l, cup, cups, tsp, tbsp, pinch, oz, fl oz, lb, pint, quart, gallon, or null. Never do unit arithmetic. Leave °F and inches in step text as written.
+- Keep section heading rows and the "section" field exactly as the candidate has them unless the source disagrees.
+- If the candidate is already faithful, return it unchanged.
+- Never drop content just because you are unsure. When the source is genuinely ambiguous, keep the candidate's reading.`;
+
+/**
+ * The photo path. Vision transcription invents text far more readily than it
+ * admits it cannot read something, and a wrong quantity here becomes a saved
+ * recipe someone cooks from months later — so the rules push hard toward
+ * "show me what you could not read" over "give me a plausible number".
+ */
+const IMAGE_SYSTEM = `${SYSTEM}
+
+The content is photographs of a recipe rather than typed text. Additional rules:
+- Transcribe what is printed. Never invent an ingredient, a quantity, or a step that is not visible in the images.
+- If a quantity is illegible, set quantity to 0 and put the printed text you can see in that ingredient's notes so the cook can correct it. Do not guess a number.
+- The images may be consecutive pages or columns of ONE recipe. Combine them into a single recipe; never return one recipe per image.
+- Ignore anything not part of the recipe: page numbers, running headers, photo captions, and text belonging to a neighbouring recipe.
+- If the images show no recipe at all, still return valid JSON with an empty steps array rather than inventing one.`;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -115,7 +184,7 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
     if (!isRecord(row)) return null;
     const rawName = typeof row.name === 'string' ? row.name.trim() : '';
     if (!rawName) return null;
-    const quantityRaw = parseQuantityValue(row.quantity);
+    const parsedQuantity = parseQuantityValue(row.quantity);
     const unit = row.unit === null || row.unit === undefined ? null : String(row.unit).trim() || null;
     const notes =
       row.notes === null || row.notes === undefined
@@ -137,13 +206,20 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
       });
       activeSection = section;
     }
-    if (quantityRaw === null) return null;
     const amountMode = row.amountMode === 'to_taste' ? 'to_taste' : 'exact';
     const looksLikeToTasteText =
       /to taste/i.test(rawName) || /to taste/i.test(notes ?? '');
     const shouldForceToTaste = isSaltOrPepperIngredient(rawName);
     const resolvedAmountMode =
       looksLikeToTasteText || shouldForceToTaste ? 'to_taste' : amountMode;
+    // A missing number is only fatal for an exact amount. A "to taste" row
+    // routinely arrives with quantity "to taste" or null, and discarding the
+    // whole recipe over one of them buys nothing but another full extraction.
+    const quantityRaw =
+      parsedQuantity === null && resolvedAmountMode === 'to_taste'
+        ? 0
+        : parsedQuantity;
+    if (quantityRaw === null) return null;
     const recoveredFromNotes =
       typeof notes === 'string' ? parseInlineIngredientText(notes) : null;
     const nextRow = index + 1 < raw.length ? raw[index + 1] : null;
@@ -193,10 +269,17 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
       }
       continue;
     }
+    // Imperial amounts are converted here rather than by the model, so the
+    // arithmetic is a table lookup with a test around it instead of a step
+    // nobody can check.
+    const amount =
+      resolvedAmountMode === 'to_taste'
+        ? { quantity: 0, unit: null }
+        : convertIngredientAmount(quantity, unit);
     out.push({
       id: newId(),
-      quantity: resolvedAmountMode === 'to_taste' ? 0 : quantity,
-      unit: resolvedAmountMode === 'to_taste' ? null : unit,
+      quantity: amount.quantity,
+      unit: amount.unit,
       name: rawName,
       notes,
       scalable: resolvedAmountMode === 'to_taste' ? false : !looksLikeSectionHeading,
@@ -206,6 +289,50 @@ function parseIngredients(raw: unknown): Ingredient[] | null {
     });
   }
   return out;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Applies the same unit handling to a step that ingredients get.
+ *
+ * A scalable amount is written into the sentence next to its placeholder
+ * ("Add {{qty_1}} oz flour"), so converting the number without rewriting the
+ * word beside it would leave the step reading in one unit and scaling in
+ * another.
+ */
+function normalizeStepMeasurements(
+  instruction: string,
+  quantities: Step['scalableQuantities']
+): { instruction: string; scalableQuantities: Step['scalableQuantities'] } {
+  let text = instruction;
+  const converted = quantities.map((quantity) => {
+    const next = convertIngredientAmount(
+      quantity.baseQuantity,
+      quantity.unit || null
+    );
+    const nextUnit = next.unit ?? '';
+    if (quantity.unit && nextUnit !== quantity.unit) {
+      text = text.replace(
+        new RegExp(
+          `(${escapeRegExp(quantity.placeholder)})\\s*${escapeRegExp(quantity.unit)}\\b`,
+          'gi'
+        ),
+        nextUnit ? `$1 ${nextUnit}` : '$1'
+      );
+    }
+    return {
+      placeholder: quantity.placeholder,
+      baseQuantity: next.quantity,
+      unit: nextUnit,
+    };
+  });
+  return {
+    instruction: convertMeasurementsInText(text),
+    scalableQuantities: converted,
+  };
 }
 
 function parseSteps(raw: unknown): Step[] | null {
@@ -230,11 +357,12 @@ function parseSteps(raw: unknown): Step[] | null {
       if (!placeholder || !Number.isFinite(baseQuantity)) return null;
       scalableQuantities.push({ placeholder, baseQuantity, unit });
     }
+    const normalized = normalizeStepMeasurements(instruction, scalableQuantities);
     out.push({
       id: newId(),
       order: order++,
-      instruction,
-      scalableQuantities,
+      instruction: normalized.instruction,
+      scalableQuantities: normalized.scalableQuantities,
     });
   }
   return out;
@@ -368,6 +496,150 @@ export function parseRecipeJson(text: string): Omit<Recipe, 'cookLogs'> | null {
   };
 }
 
+const JSON_FEEDBACK =
+  'Return valid JSON only and ensure method steps are fully detailed and specific.';
+const METHOD_FEEDBACK =
+  'The method was too brief. Rewrite steps with concrete detail: include timing, heat/temperature, sequence, and doneness cues for each major action.';
+
+function stripFences(raw: string): string {
+  return raw
+    .replace(/^```json\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+}
+
+/** A draft, kept alongside the model's own JSON so the audit can re-read it. */
+type ExtractionDraft = { parsed: Omit<Recipe, 'cookLogs'>; raw: string };
+
+/**
+ * The ask-parse-validate-retry loop shared by the text and photo paths. Each
+ * attempt re-sends the whole prompt with a correction appended, so `maxAttempts`
+ * is a direct multiplier on both cost and the time the user watches a spinner.
+ */
+async function runExtraction(
+  provider: AiProvider,
+  apiKey: string,
+  config: {
+    system: string;
+    /** Called per attempt; `feedback` is '' on the first one. */
+    buildUserContent: (feedback: string) => string | LlmContentPart[];
+    sourceHasSubstantialMethod: boolean;
+    maxAttempts: number;
+    temperature?: number;
+    timeoutMs?: number;
+    parseFailureMessage: string;
+    methodFailureMessage: string;
+  }
+): Promise<ExtractionDraft> {
+  let feedback = '';
+  for (let attempt = 0; attempt < config.maxAttempts; attempt += 1) {
+    const isLastAttempt = attempt === config.maxAttempts - 1;
+
+    const raw = await llmCompletion(
+      provider,
+      apiKey,
+      [
+        { role: 'system', content: config.system },
+        { role: 'user', content: config.buildUserContent(feedback) },
+      ],
+      {
+        temperature: config.temperature,
+        timeoutMs: config.timeoutMs,
+        effort: EXTRACTION_EFFORT,
+      }
+    );
+
+    const cleaned = stripFences(raw);
+    const parsed = parseRecipeJson(cleaned);
+    if (!parsed) {
+      if (isLastAttempt) {
+        throw new Error(config.parseFailureMessage);
+      }
+      feedback = JSON_FEEDBACK;
+      continue;
+    }
+    if (
+      !stepsAreDetailedEnough(parsed.steps, {
+        sourceHasSubstantialMethod: config.sourceHasSubstantialMethod,
+      })
+    ) {
+      if (isLastAttempt) {
+        throw new Error(config.methodFailureMessage);
+      }
+      feedback = METHOD_FEEDBACK;
+      continue;
+    }
+    return { parsed, raw: cleaned };
+  }
+  throw new Error('Could not extract recipe method details');
+}
+
+/**
+ * True when an audit result looks like a failure rather than a correction.
+ *
+ * Removing a hallucinated row or two is the audit working. Coming back with
+ * half the recipe missing is the audit itself going wrong, and the draft is
+ * the safer thing to keep.
+ */
+export function isSuspectAudit(
+  draft: Pick<Recipe, 'ingredients' | 'steps'>,
+  audited: Pick<Recipe, 'ingredients' | 'steps'>
+): boolean {
+  if (audited.ingredients.length === 0 || audited.steps.length === 0) return true;
+  if (audited.ingredients.length * 2 < draft.ingredients.length) return true;
+  if (audited.steps.length * 2 < draft.steps.length) return true;
+  return false;
+}
+
+/**
+ * Second pass: re-read the source against the draft and correct it.
+ *
+ * Re-running the extraction prompt produces the same confident mistakes,
+ * because the failure is in the reading rather than in the sampling. Handing
+ * the model its own draft to check against the source is what catches a
+ * dropped ingredient line or two method steps fused into one.
+ *
+ * Every failure path here returns the draft. An audit that errors, times out,
+ * comes back unparseable or comes back gutted must never cost the cook the
+ * import they already waited for.
+ */
+async function runVerification(
+  provider: AiProvider,
+  apiKey: string,
+  config: {
+    buildUserContent: (candidateJson: string) => string | LlmContentPart[];
+    sourceHasSubstantialMethod: boolean;
+    timeoutMs: number;
+  },
+  draft: ExtractionDraft
+): Promise<Omit<Recipe, 'cookLogs'>> {
+  try {
+    const corrected = await llmCompletion(
+      provider,
+      apiKey,
+      [
+        { role: 'system', content: VERIFY_SYSTEM },
+        { role: 'user', content: config.buildUserContent(draft.raw) },
+      ],
+      { temperature: 0, timeoutMs: config.timeoutMs, effort: EXTRACTION_EFFORT }
+    );
+    if (typeof corrected !== 'string') return draft.parsed;
+    const audited = parseRecipeJson(stripFences(corrected));
+    if (!audited) return draft.parsed;
+    if (
+      !stepsAreDetailedEnough(audited.steps, {
+        sourceHasSubstantialMethod: config.sourceHasSubstantialMethod,
+      })
+    ) {
+      return draft.parsed;
+    }
+    if (isSuspectAudit(draft.parsed, audited)) return draft.parsed;
+    return audited;
+  } catch {
+    return draft.parsed;
+  }
+}
+
 export async function extractRecipeFromText(
   provider: AiProvider,
   apiKey: string,
@@ -383,56 +655,123 @@ Source URL (may be empty): ${payload.sourceUrl}
 Content:
 ${payload.content.slice(0, 24000)}`;
   const sourceMethod = analyzeSourceMethod(payload.content);
-  let methodFeedback = '';
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const user = methodFeedback
-      ? `${baseUser}
+  const draft = await runExtraction(provider, apiKey, {
+    system: SYSTEM,
+    buildUserContent: (feedback) =>
+      feedback
+        ? `${baseUser}
 
 Additional instruction:
-${methodFeedback}`
-      : baseUser;
+${feedback}`
+        : baseUser,
+    sourceHasSubstantialMethod: sourceMethod.hasSubstantialMethod,
+    maxAttempts: 3,
+    temperature: 0,
+    timeoutMs: EXTRACTION_TIMEOUT_MS,
+    parseFailureMessage: 'Could not parse recipe JSON from model output',
+    methodFailureMessage: sourceMethod.hasSubstantialMethod
+      ? 'Could not extract a usable method from this recipe. Check the source text and try again.'
+      : 'Imported method is too brief. Add numbered steps with timing, heat, and doneness cues, then try again.',
+  });
+  const verified = await runVerification(
+    provider,
+    apiKey,
+    {
+      buildUserContent: (candidate) => `${baseUser}
 
-    const raw = await llmCompletion(
-      provider,
-      apiKey,
-      [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: user },
-      ],
-      { temperature: 0.2 }
-    );
+CANDIDATE EXTRACTION:
+${candidate}
 
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
-    const parsed = parseRecipeJson(cleaned);
-    if (!parsed) {
-      if (attempt === 2) {
-        throw new Error('Could not parse recipe JSON from model output');
-      }
-      methodFeedback =
-        'Return valid JSON only and ensure method steps are fully detailed and specific.';
-      continue;
-    }
-    if (
-      !stepsAreDetailedEnough(parsed.steps, {
-        sourceHasSubstantialMethod: sourceMethod.hasSubstantialMethod,
-      })
-    ) {
-      if (attempt === 2) {
-        throw new Error(
-          sourceMethod.hasSubstantialMethod
-            ? 'Could not extract a usable method from this recipe. Check the source text and try again.'
-            : 'Imported method is too brief. Add numbered steps with timing, heat, and doneness cues, then try again.'
-        );
-      }
-      methodFeedback =
-        'The method was too brief. Rewrite steps with concrete detail: include timing, heat/temperature, sequence, and doneness cues for each major action.';
-      continue;
-    }
-    return {
-      ...parsed,
-      sourceUrl: payload.sourceUrl,
-      sourceType: payload.sourceType,
-    };
+Audit the candidate against the source above and output the corrected JSON.`,
+      sourceHasSubstantialMethod: sourceMethod.hasSubstantialMethod,
+      timeoutMs: EXTRACTION_TIMEOUT_MS,
+    },
+    draft
+  );
+  return {
+    ...verified,
+    sourceUrl: payload.sourceUrl,
+    sourceType: payload.sourceType,
+  };
+}
+
+export async function extractRecipeFromImages(
+  provider: AiProvider,
+  apiKey: string,
+  images: ScanImage[]
+): Promise<Omit<Recipe, 'cookLogs'>> {
+  if (images.length === 0) {
+    throw new Error('Add at least one photo.');
   }
-  throw new Error('Could not extract recipe method details');
+
+  // Each image is introduced by its own label so the model can be told to treat
+  // them as pages of one recipe, and so a later turn could refer to them.
+  const imageBlocks = (): LlmContentPart[] =>
+    images.flatMap((image, index) => [
+      { type: 'text' as const, text: `Image ${index + 1}:` },
+      {
+        type: 'image' as const,
+        mediaType: image.mediaType,
+        base64: image.base64,
+      },
+    ]);
+
+  const buildUserContent = (feedback: string): LlmContentPart[] => {
+    const parts = imageBlocks();
+    const trailing =
+      images.length === 1
+        ? 'Extract the recipe shown in this photo.'
+        : `These ${images.length} photos are pages of a single recipe. Extract that one recipe.`;
+    parts.push({
+      type: 'text',
+      text: feedback ? `${trailing}\n\nAdditional instruction:\n${feedback}` : trailing,
+    });
+    return parts;
+  };
+
+  // The audit re-sends the photos so the model can re-read the page rather
+  // than reason about its own draft in the abstract. That is the expensive
+  // half of a scan, and it is the half that catches a misread quantity.
+  const buildAuditContent = (candidateJson: string): LlmContentPart[] => {
+    const parts = imageBlocks();
+    parts.push({
+      type: 'text',
+      text: `CANDIDATE EXTRACTION:
+${candidateJson}
+
+Audit the candidate against the photographs above and output the corrected JSON. Re-read every printed quantity. If a quantity is illegible in the photo, set it to 0 and put the printed text in that ingredient's notes rather than guessing a number.`,
+    });
+    return parts;
+  };
+
+  const draft = await runExtraction(provider, apiKey, {
+    system: IMAGE_SYSTEM,
+    buildUserContent,
+    // There is no source text to analyse, and analyzeSourceMethod('') reports
+    // false — which selects the *stricter* gate and then fails with advice
+    // about pasting numbered steps. Neither fits a photo, so assume the page
+    // has a real method and let the gate judge the model's output on its own.
+    sourceHasSubstantialMethod: true,
+    // One retry, not two. Every attempt re-uploads every image, so a third try
+    // roughly triples the cost of a scan for a page that is usually just too
+    // blurry or too cropped to read.
+    maxAttempts: 2,
+    temperature: 0,
+    timeoutMs: VISION_TIMEOUT_MS,
+    parseFailureMessage:
+      'Could not read a recipe from these photos. Try again with more even lighting and the whole page in frame.',
+    methodFailureMessage:
+      'Could not read a full method from these photos. Check the method page is included and in focus, then try again.',
+  });
+  const verified = await runVerification(
+    provider,
+    apiKey,
+    {
+      buildUserContent: buildAuditContent,
+      sourceHasSubstantialMethod: true,
+      timeoutMs: VISION_TIMEOUT_MS,
+    },
+    draft
+  );
+  return { ...verified, sourceUrl: '', sourceType: 'manual' };
 }
