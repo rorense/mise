@@ -8,6 +8,12 @@
     "scheme": "mise",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/be03d385-78a1-40c2-832f-8fec5d9b5f13"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -43,16 +49,7 @@
           "cameraPermission": "Allow Mise en to take cook photos."
         }
       ],
-      "expo-font",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "kotlinVersion": "2.0.21",
-            "ndkVersion": "27.1.12297006"
-          }
-        }
-      ]
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": false
