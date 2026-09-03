@@ -1,15 +1,11 @@
 import { fetchWithTimeout, LLM_TIMEOUT_MS } from '@/lib/http';
+import type { LlmMessage } from '@/lib/llm';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
 export async function chatCompletion(
   apiKey: string,
-  messages: ChatMessage[],
+  messages: LlmMessage[],
   options?: { model?: string; temperature?: number }
 ): Promise<string> {
   const model = options?.model ?? 'gpt-4o';

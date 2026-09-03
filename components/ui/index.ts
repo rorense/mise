@@ -6,6 +6,7 @@ export { IconButton, type IconButtonProps, type IconButtonVariant } from './Icon
 export { ImageScrim, type ImageScrimProps } from './ImageScrim';
 export { ModalCard, type ModalCardProps } from './ModalCard';
 export { Screen, type ScreenHeader, type ScreenProps } from './Screen';
+export { ScreenLoading } from './ScreenLoading';
 export { Section, type SectionProps } from './Section';
 export {
   SegmentedControl,

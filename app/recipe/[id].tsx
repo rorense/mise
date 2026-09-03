@@ -9,6 +9,7 @@ import {
   Chip,
   IconButton,
   ImageScrim,
+  ScreenLoading,
   Text,
   TextField,
 } from '@/components/ui';
@@ -225,16 +226,7 @@ export default function RecipeDetailScreen() {
 
   if (isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator color={colors.primary} />
-      </View>
+      <ScreenLoading />
     );
   }
 

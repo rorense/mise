@@ -1,5 +1,6 @@
+import { isRecord } from '@/lib/guards';
 import { newId } from '@/lib/id';
-import { llmCompletion } from '@/lib/llm';
+import { cleanModelJson, llmCompletion } from '@/lib/llm';
 import type { AiProvider } from '@/lib/secrets';
 import { isLikelySectionHeadingLabel } from '@/domain/scaling';
 import type { Ingredient, Recipe, SourceType, Step } from '@/types/recipe';
@@ -33,10 +34,6 @@ Rules:
 - Do not collapse multiple distinct actions into vague single lines.
 - Avoid vague instructions like "cook until done" unless the source gives no better detail. Prefer concrete wording.
 - tags: short lowercase tokens like "dinner", "vegetarian".`;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 function parseQuantityValue(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw)) {
@@ -402,8 +399,7 @@ ${methodFeedback}`
       { temperature: 0.2 }
     );
 
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
-    const parsed = parseRecipeJson(cleaned);
+    const parsed = parseRecipeJson(cleanModelJson(raw));
     if (!parsed) {
       if (attempt === 2) {
         throw new Error('Could not parse recipe JSON from model output');

@@ -5,6 +5,7 @@ import {
   IconButton,
   ImageScrim,
   ModalCard,
+  ScreenLoading,
   Text,
   TextField,
 } from '@/components/ui';
@@ -26,7 +27,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   Pressable,
@@ -177,16 +177,7 @@ export default function LibraryScreen() {
 
   if (!onboardingChecked) {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator color={colors.primary} />
-      </View>
+      <ScreenLoading />
     );
   }
 

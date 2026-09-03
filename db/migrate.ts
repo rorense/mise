@@ -125,6 +125,34 @@ const MIGRATIONS: Record<number, string> = {
   `,
 };
 
+/**
+ * Migrations that add a column which migration 1's `CREATE TABLE` was later
+ * edited to declare. On a fresh install the baseline already has the column, so
+ * the `ALTER` would fail with "duplicate column name" — these are recorded as
+ * done instead of run. An install old enough to predate the column still gets
+ * the real `ALTER`.
+ *
+ * Deleting an entry here breaks first launch on a clean install and nowhere
+ * else, so it will not reproduce on any device that already has the database.
+ * `__tests__/migrations.test.ts` covers both directions.
+ */
+const ADDS_COLUMN: Record<number, { table: string; column: string }> = {
+  6: { table: 'ingredients', column: 'amount_mode' },
+  9: { table: 'ingredients', column: 'is_section_heading' },
+};
+
+/** `PRAGMA` takes no bound parameters; `table` is always a literal from above. */
+async function hasColumn(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string
+): Promise<boolean> {
+  const columns = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info(${table})`
+  );
+  return columns.some((entry) => entry.name === column);
+}
+
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA foreign_keys = ON;');
   // WAL lets reads proceed while a write is in flight — the right mode for a
@@ -146,41 +174,26 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     .sort((a, b) => a - b);
 
   for (const version of versions) {
-    if (version > current) {
-      if (version === 6) {
-        const columns = await db.getAllAsync<{ name: string }>(
-          'PRAGMA table_info(ingredients)'
-        );
-        const hasAmountMode = columns.some((column) => column.name === 'amount_mode');
-        if (hasAmountMode) {
-          await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
-          current = version;
-          continue;
-        }
-      }
-      if (version === 9) {
-        const columns = await db.getAllAsync<{ name: string }>(
-          'PRAGMA table_info(ingredients)'
-        );
-        const hasSectionFlag = columns.some(
-          (column) => column.name === 'is_section_heading'
-        );
-        if (hasSectionFlag) {
-          await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
-          current = version;
-          continue;
-        }
-      }
-      // The DDL and its version row commit together. Without this a migration
-      // that fails halfway leaves its statements applied but unrecorded, so the
-      // next launch replays it and dies on "duplicate column" — permanently.
-      await db.withTransactionAsync(async () => {
-        await db.execAsync(MIGRATIONS[version]);
-        await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [
-          version,
-        ]);
-      });
+    if (version <= current) continue;
+
+    // A guarded version's column is already present on a fresh install, so its
+    // ALTER would fail. Record it as done instead of running it.
+    const guard = ADDS_COLUMN[version];
+    if (guard && (await hasColumn(db, guard.table, guard.column))) {
+      await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [version]);
       current = version;
+      continue;
     }
+
+    // The DDL and its version row commit together. Without this a migration
+    // that fails halfway leaves its statements applied but unrecorded, so the
+    // next launch replays it and dies on "duplicate column" — permanently.
+    await db.withTransactionAsync(async () => {
+      await db.execAsync(MIGRATIONS[version]);
+      await db.runAsync('INSERT INTO schema_migrations (version) VALUES (?)', [
+        version,
+      ]);
+    });
+    current = version;
   }
 }

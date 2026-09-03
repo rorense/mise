@@ -1,62 +1,58 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 
-function cookDir(): string {
+/**
+ * The photo folders under the document directory. `data/backup.ts` walks these
+ * too when collecting and restoring photos, so it reads the list from here — a
+ * third media kind then only has to be added in one place.
+ */
+export const MEDIA_DIRS = ['cook-photos', 'recipe-photos'] as const;
+
+export type MediaDir = (typeof MEDIA_DIRS)[number];
+
+async function ensureMediaDir(dir: MediaDir): Promise<string> {
   const base = FileSystem.documentDirectory ?? '';
-  return `${base}cook-photos`;
-}
-
-function recipeDir(): string {
-  const base = FileSystem.documentDirectory ?? '';
-  return `${base}recipe-photos`;
-}
-
-export async function ensureCookPhotoDir(): Promise<string> {
-  const dir = cookDir();
-  const info = await FileSystem.getInfoAsync(dir);
+  const path = `${base}${dir}`;
+  const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(path, { intermediates: true });
   }
-  return dir;
+  return path;
 }
 
-export async function ensureRecipePhotoDir(): Promise<string> {
-  const dir = recipeDir();
-  const info = await FileSystem.getInfoAsync(dir);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-  }
-  return dir;
-}
-
-export async function compressAndSaveCookPhoto(
+/**
+ * Camera and gallery images run several megabytes each and are only ever shown
+ * at card or hero size, so everything is resized and re-encoded on the way in
+ * rather than storing the original.
+ */
+async function compressAndSave(
+  dir: MediaDir,
   sourceUri: string,
   destFileName: string
 ): Promise<string> {
-  const dir = await ensureCookPhotoDir();
+  const target = await ensureMediaDir(dir);
   const manipulated = await ImageManipulator.manipulateAsync(
     sourceUri,
     [{ resize: { width: 1200 } }],
     { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
   );
-  const dest = `${dir}/${destFileName}.jpg`;
+  const dest = `${target}/${destFileName}.jpg`;
   await FileSystem.copyAsync({ from: manipulated.uri, to: dest });
   return dest;
 }
 
-export async function compressAndSaveMainRecipePhoto(
+export function compressAndSaveCookPhoto(
   sourceUri: string,
   destFileName: string
 ): Promise<string> {
-  const dir = await ensureRecipePhotoDir();
-  const manipulated = await ImageManipulator.manipulateAsync(
-    sourceUri,
-    [{ resize: { width: 1200 } }],
-    { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-  );
-  const dest = `${dir}/${destFileName}.jpg`;
-  await FileSystem.copyAsync({ from: manipulated.uri, to: dest });
-  return dest;
+  return compressAndSave('cook-photos', sourceUri, destFileName);
+}
+
+export function compressAndSaveMainRecipePhoto(
+  sourceUri: string,
+  destFileName: string
+): Promise<string> {
+  return compressAndSave('recipe-photos', sourceUri, destFileName);
 }
 
 export async function estimateAppStorageBytes(): Promise<number> {

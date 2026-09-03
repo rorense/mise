@@ -1,5 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '@/db/client';
+import { isRecord } from '@/lib/guards';
+import { MEDIA_DIRS } from '@/lib/media';
 import {
   getAppearance,
   setAppearance,
@@ -62,8 +64,6 @@ export type BackupSummary = {
   cookLogs: number;
   photos: number;
 };
-
-const MEDIA_DIRS = ['cook-photos', 'recipe-photos'] as const;
 
 /** `file:///…/Documents/cook-photos/x.jpg` → `cook-photos/x.jpg`. */
 function toRelativeMediaPath(uri: string): string | null {
@@ -210,10 +210,6 @@ export async function getStoredRecipeCount(): Promise<number> {
 export async function exportBackupJson(): Promise<string> {
   const payload = await exportBackupPayload();
   return JSON.stringify(payload);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isBackupRows(value: unknown): value is BackupRow[] {

@@ -2,7 +2,7 @@ import { AppDialog } from '@/components/AppDialog';
 import { BackButton } from '@/components/BackButton';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FullscreenImageViewer } from '@/components/FullscreenImageViewer';
-import { Button, Card, Text } from '@/components/ui';
+import { Button, Card, ScreenLoading, Text } from '@/components/ui';
 import { pressedStyle } from '@/components/ui/press';
 import {
   deleteCookLogWithUndoData,
@@ -14,7 +14,7 @@ import { space } from '@/theme/tokens';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, View } from 'react-native';
+import { Image, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const HERO_HEIGHT = 280;
@@ -40,16 +40,7 @@ export default function CookLogScreen() {
 
   if (!data) {
     return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator color={colors.primary} />
-      </View>
+      <ScreenLoading />
     );
   }
 

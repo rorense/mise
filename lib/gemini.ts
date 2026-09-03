@@ -1,16 +1,12 @@
 import { fetchWithTimeout, LLM_TIMEOUT_MS } from '@/lib/http';
+import type { LlmMessage } from '@/lib/llm';
 
 const GEMINI_BASE =
   'https://generativelanguage.googleapis.com/v1beta/models';
 
-export type GeminiMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
-
 export async function geminiCompletion(
   apiKey: string,
-  messages: GeminiMessage[],
+  messages: LlmMessage[],
   options?: { model?: string; temperature?: number }
 ): Promise<string> {
   const model = options?.model ?? 'gemini-1.5-flash';

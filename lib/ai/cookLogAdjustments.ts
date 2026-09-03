@@ -1,4 +1,5 @@
-import { llmCompletion } from '@/lib/llm';
+import { isRecord } from '@/lib/guards';
+import { cleanModelJson, llmCompletion } from '@/lib/llm';
 import { newId } from '@/lib/id';
 import type { AiProvider } from '@/lib/secrets';
 import type { Recipe, RecipeAdjustmentSuggestion } from '@/types/recipe';
@@ -17,14 +18,6 @@ Rules:
 - When suggesting any recipe change, also include ingredient list updates whenever the note implies ingredient amounts or amount modes should change.
 - If a suggested step change depends on ingredient amount/taste handling, include matching ingredient_quantity or ingredient_amount_mode suggestions for the same evidence.
 - Do not add/remove ingredients or steps.`;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function cleanModelJson(raw: string): string {
-  return raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
-}
 
 function textContainsEvidence(note: string, evidence: string): boolean {
   const noteLower = note.toLowerCase();
