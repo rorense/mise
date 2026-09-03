@@ -296,10 +296,6 @@ export function inspectBackupJson(rawJson: string): {
   };
 }
 
-export async function restoreBackupJson(rawJson: string): Promise<void> {
-  return restoreBackupPayload(validatePayload(JSON.parse(rawJson)));
-}
-
 export async function restoreBackupPayload(parsed: BackupPayload): Promise<void> {
   const db = await getDatabase();
 

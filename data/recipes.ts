@@ -1383,53 +1383,6 @@ export async function getCookLogById(
   };
 }
 
-export async function bulkEditRecipeTags(args: {
-  recipeIds: string[];
-  addTags: string[];
-  removeTags: string[];
-}): Promise<void> {
-  const db = await getDatabase();
-  if (args.recipeIds.length === 0) return;
-  const addTags = args.addTags.map((t) => t.trim()).filter(Boolean);
-  const removeTags = new Set(args.removeTags.map((t) => t.trim().toLowerCase()).filter(Boolean));
-
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    const addTagIds = await ensureTagIds(txn, addTags);
-    for (const recipeId of args.recipeIds) {
-      if (addTagIds.length > 0) {
-        for (const tagId of addTagIds) {
-          await txn.runAsync(
-            'INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?, ?)',
-            [recipeId, tagId]
-          );
-        }
-      }
-      if (removeTags.size > 0) {
-        const existing = await db.getAllAsync<{ tag_id: string; name: string }>(
-          `SELECT rt.tag_id as tag_id, t.name as name
-           FROM recipe_tags rt
-           JOIN tags t ON t.id = rt.tag_id
-           WHERE rt.recipe_id = ?`,
-          [recipeId]
-        );
-        for (const tag of existing) {
-          if (removeTags.has(tag.name.toLowerCase())) {
-            await txn.runAsync(
-              'DELETE FROM recipe_tags WHERE recipe_id = ? AND tag_id = ?',
-              [recipeId, tag.tag_id]
-            );
-          }
-        }
-      }
-      await txn.runAsync('UPDATE recipes SET updated_at = ? WHERE id = ?', [
-        new Date().toISOString(),
-        recipeId,
-      ]);
-    }
-    await deleteOrphanTags(txn);
-  });
-}
-
 export async function createManualRecipeDraft(): Promise<Omit<Recipe, 'cookLogs'>> {
   const id = newId();
   const now = new Date().toISOString();

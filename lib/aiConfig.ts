@@ -5,10 +5,6 @@ import {
   type AiProvider,
 } from '@/lib/secrets';
 
-export async function getActiveAiProvider(): Promise<AiProvider> {
-  return getAiProvider();
-}
-
 export type AiUnavailableReason = 'disabled' | 'missing-key';
 
 export type AiCredentials =

@@ -20,8 +20,3 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   }
   return dbPromise;
 }
-
-export async function resetDatabaseForTests(): Promise<void> {
-  dbPromise = null;
-  await SQLite.deleteDatabaseAsync('mise.db');
-}

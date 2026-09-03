@@ -34,10 +34,6 @@ export function setImportDraft(recipe: Draft): void {
   void writeDraftFile(recipe);
 }
 
-export function peekImportDraft(): Draft | null {
-  return draft;
-}
-
 export function takeImportDraft(): Draft | null {
   const d = draft;
   draft = null;

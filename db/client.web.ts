@@ -9,7 +9,3 @@ function unsupportedError(): Error {
 export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   return Promise.reject(unsupportedError());
 }
-
-export async function resetDatabaseForTests(): Promise<void> {
-  return Promise.resolve();
-}
