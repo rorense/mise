@@ -2,6 +2,7 @@ import { useTheme } from '@/theme/ThemeContext';
 import { control, space } from '@/theme/tokens';
 import { useRouter } from 'expo-router';
 import {
+  KeyboardAvoidingView,
   ScrollView,
   View,
   type ScrollViewProps,
@@ -93,7 +94,10 @@ export function Screen({
   );
 
   return (
-    <View
+    // Android runs edge-to-edge, so `adjustResize` no longer shrinks the window
+    // and the keyboard would cover the field. Pad on both platforms instead.
+    <KeyboardAvoidingView
+      behavior="padding"
       style={[
         { flex: 1, backgroundColor: colors.background, paddingTop: insets.top },
         style,
@@ -161,6 +165,6 @@ export function Screen({
           {footer}
         </View>
       ) : null}
-    </View>
+    </KeyboardAvoidingView>
   );
 }

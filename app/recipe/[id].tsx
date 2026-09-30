@@ -52,8 +52,6 @@ import {
   presentTimerDoneNotification,
 } from '@/lib/timerNotifications';
 import {
-  KEYBOARD_AVOIDING_BEHAVIOR,
-  KEYBOARD_VERTICAL_OFFSET,
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
 import { useTheme } from '@/theme/ThemeContext';
@@ -620,8 +618,7 @@ export default function RecipeDetailScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.background }}
-      behavior={KEYBOARD_AVOIDING_BEHAVIOR}
-      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+      behavior="padding"
     >
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <BackButton

@@ -1,15 +1,9 @@
 import { useRef } from 'react';
 import {
   findNodeHandle,
-  Platform,
   ScrollView,
   TextInput,
 } from 'react-native';
-
-export const KEYBOARD_VERTICAL_OFFSET = 72;
-
-export const KEYBOARD_AVOIDING_BEHAVIOR: 'padding' | undefined =
-  Platform.OS === 'ios' ? 'padding' : undefined;
 
 export function useKeyboardSafeScroll<T extends ScrollView>() {
   const scrollRef = useRef<T>(null);

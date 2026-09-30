@@ -22,8 +22,6 @@ import { importFromManualText } from '@/lib/import/pipeline';
 import { restoreImportDraft, takeImportDraft } from '@/lib/importDraftStore';
 import { getSeenStepDragHint, setSeenStepDragHint } from '@/lib/secrets';
 import {
-  KEYBOARD_AVOIDING_BEHAVIOR,
-  KEYBOARD_VERTICAL_OFFSET,
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
 import { useTheme } from '@/theme/ThemeContext';
@@ -35,7 +33,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   BackHandler,
-  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   TextInput,
@@ -387,224 +384,246 @@ export default function RecipeFormScreen() {
   } as const;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      behavior={KEYBOARD_AVOIDING_BEHAVIOR}
-      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+    <Screen
+      scroll
+      scrollRef={scrollRef}
+      header={{
+        title: recipeId ? 'Edit recipe' : 'New recipe',
+        back: true,
+        onBack: requestLeave,
+      }}
+      gap={space.lg}
+      footer={
+        <Button
+          label={isSaving ? 'Saving…' : 'Save'}
+          size="lg"
+          fullWidth
+          icon="checkmark"
+          loading={isSaving}
+          disabled={isSaving}
+          accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe'}
+          onPress={save}
+        />
+      }
     >
-      <Screen
-        scroll
-        scrollRef={scrollRef}
-        header={{
-          title: recipeId ? 'Edit recipe' : 'New recipe',
-          back: true,
-          onBack: requestLeave,
+      <TextField
+        label="Title"
+        accessibilityLabel="Title"
+        value={recipe.title}
+        error={errors.title}
+        onChangeText={(t) => {
+          setRecipe({ ...recipe, title: t });
+          if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
         }}
-        gap={space.lg}
-        footer={
-          <Button
-            label={isSaving ? 'Saving…' : 'Save'}
-            size="lg"
-            fullWidth
-            icon="checkmark"
-            loading={isSaving}
-            disabled={isSaving}
-            accessibilityLabel={isSaving ? 'Saving recipe' : 'Save recipe'}
-            onPress={save}
+        onFocus={scrollFocusedInputIntoView}
+      />
+      <TextField
+        label="Base servings"
+        accessibilityLabel="Base servings"
+        value={baseServingsInput ?? String(recipe.baseServings)}
+        keyboardType="decimal-pad"
+        onChangeText={(t) => {
+          setBaseServingsInput(t);
+          const parsed = Number(t);
+          if (!Number.isFinite(parsed) || parsed <= 0) return;
+          setRecipe({ ...recipe, baseServings: parsed });
+        }}
+        onBlur={() => {
+          if (baseServingsInput === null) return;
+          const parsed = Number(baseServingsInput);
+          setRecipe({
+            ...recipe,
+            baseServings: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
+          });
+          setBaseServingsInput(null);
+        }}
+        onFocus={scrollFocusedInputIntoView}
+      />
+
+      <Disclosure
+        label="More options"
+        accessibilityLabel="Advanced options"
+        open={showAdvanced}
+        onToggle={() => setShowAdvanced((v) => !v)}
+      />
+      {showAdvanced ? (
+        <>
+          <TextField
+            label="Source URL"
+            accessibilityLabel="Source URL"
+            value={recipe.sourceUrl}
+            autoCapitalize="none"
+            keyboardType="url"
+            onChangeText={(t) => setRecipe({ ...recipe, sourceUrl: t })}
+            onFocus={scrollFocusedInputIntoView}
           />
-        }
-      >
-        <TextField
-          label="Title"
-          accessibilityLabel="Title"
-          value={recipe.title}
-          error={errors.title}
-          onChangeText={(t) => {
-            setRecipe({ ...recipe, title: t });
-            if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }));
-          }}
-          onFocus={scrollFocusedInputIntoView}
-        />
-        <TextField
-          label="Base servings"
-          accessibilityLabel="Base servings"
-          value={baseServingsInput ?? String(recipe.baseServings)}
-          keyboardType="decimal-pad"
-          onChangeText={(t) => {
-            setBaseServingsInput(t);
-            const parsed = Number(t);
-            if (!Number.isFinite(parsed) || parsed <= 0) return;
-            setRecipe({ ...recipe, baseServings: parsed });
-          }}
-          onBlur={() => {
-            if (baseServingsInput === null) return;
-            const parsed = Number(baseServingsInput);
-            setRecipe({
-              ...recipe,
-              baseServings: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
-            });
-            setBaseServingsInput(null);
-          }}
-          onFocus={scrollFocusedInputIntoView}
-        />
+          <TextField
+            label="Cuisine"
+            accessibilityLabel="Cuisine"
+            value={recipe.cuisine ?? ''}
+            onChangeText={(t) => setRecipe({ ...recipe, cuisine: t || undefined })}
+            onFocus={scrollFocusedInputIntoView}
+          />
+          <TextField
+            label="Main image URI"
+            hint="Optional"
+            accessibilityLabel="Main image URI, optional"
+            value={recipe.mainImageUri ?? ''}
+            autoCapitalize="none"
+            onChangeText={(t) =>
+              setRecipe({ ...recipe, mainImageUri: t.trim() ? t.trim() : undefined })
+            }
+            onFocus={scrollFocusedInputIntoView}
+          />
+        </>
+      ) : null}
 
-        <Disclosure
-          label="More options"
-          accessibilityLabel="Advanced options"
-          open={showAdvanced}
-          onToggle={() => setShowAdvanced((v) => !v)}
-        />
-        {showAdvanced ? (
-          <>
-            <TextField
-              label="Source URL"
-              accessibilityLabel="Source URL"
-              value={recipe.sourceUrl}
-              autoCapitalize="none"
-              keyboardType="url"
-              onChangeText={(t) => setRecipe({ ...recipe, sourceUrl: t })}
-              onFocus={scrollFocusedInputIntoView}
-            />
-            <TextField
-              label="Cuisine"
-              accessibilityLabel="Cuisine"
-              value={recipe.cuisine ?? ''}
-              onChangeText={(t) => setRecipe({ ...recipe, cuisine: t || undefined })}
-              onFocus={scrollFocusedInputIntoView}
-            />
-            <TextField
-              label="Main image URI"
-              hint="Optional"
-              accessibilityLabel="Main image URI, optional"
-              value={recipe.mainImageUri ?? ''}
-              autoCapitalize="none"
-              onChangeText={(t) =>
-                setRecipe({ ...recipe, mainImageUri: t.trim() ? t.trim() : undefined })
-              }
-              onFocus={scrollFocusedInputIntoView}
-            />
-          </>
-        ) : null}
+      <Disclosure
+        label="Paste raw recipe (AI)"
+        accessibilityLabel="Paste and parse with AI"
+        open={showPasteAi}
+        onToggle={() => setShowPasteAi((v) => !v)}
+      />
+      {showPasteAi ? (
+        <>
+          <TextField
+            accessibilityLabel="Recipe text to parse"
+            hint="Paste ingredients and instructions in one block; we will split them into ingredients and steps."
+            multiline
+            value={rawPasteText}
+            onChangeText={setRawPasteText}
+            onFocus={scrollFocusedInputIntoView}
+            placeholder="Paste anything: blog text, notes, a caption…"
+          />
+          <Button
+            label="Parse with AI"
+            icon="sparkles-outline"
+            fullWidth
+            loading={parseBusy}
+            disabled={parseBusy}
+            accessibilityLabel={parseBusy ? 'Parsing recipe text' : 'Parse pasted text'}
+            onPress={runAiParse}
+          />
+        </>
+      ) : null}
 
-        <Disclosure
-          label="Paste raw recipe (AI)"
-          accessibilityLabel="Paste and parse with AI"
-          open={showPasteAi}
-          onToggle={() => setShowPasteAi((v) => !v)}
-        />
-        {showPasteAi ? (
-          <>
-            <TextField
-              accessibilityLabel="Recipe text to parse"
-              hint="Paste ingredients and instructions in one block; we will split them into ingredients and steps."
-              multiline
-              value={rawPasteText}
-              onChangeText={setRawPasteText}
-              onFocus={scrollFocusedInputIntoView}
-              placeholder="Paste anything: blog text, notes, a caption…"
-            />
-            <Button
-              label="Parse with AI"
-              icon="sparkles-outline"
-              fullWidth
-              loading={parseBusy}
-              disabled={parseBusy}
-              accessibilityLabel={parseBusy ? 'Parsing recipe text' : 'Parse pasted text'}
-              onPress={runAiParse}
-            />
-          </>
-        ) : null}
+      <SectionHeader
+        label="Ingredients"
+        count={recipe.ingredients.length}
+        open={showIngredients}
+        onToggle={() => setShowIngredients((v) => !v)}
+        onAdd={addIngredient}
+        addLabel="Add ingredient"
+        accessibilityLabel="Ingredients section"
+      />
 
-        <SectionHeader
-          label="Ingredients"
-          count={recipe.ingredients.length}
-          open={showIngredients}
-          onToggle={() => setShowIngredients((v) => !v)}
-          onAdd={addIngredient}
-          addLabel="Add ingredient"
-          accessibilityLabel="Ingredients section"
-        />
-
-        {showIngredients
-          ? recipe.ingredients.map((ing, idx) => {
-              const isActive = activeIngredientId === ing.id;
-              const isSectionHeading = isIngredientSectionHeading(ing);
-              return (
-                <View
-                  key={ing.id}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: isActive ? colors.primary : colors.border,
-                    borderRadius: radius.md,
-                    padding: space.md,
-                    gap: space.md,
-                    backgroundColor: colors.surface,
+      {showIngredients
+        ? recipe.ingredients.map((ing, idx) => {
+            const isActive = activeIngredientId === ing.id;
+            const isSectionHeading = isIngredientSectionHeading(ing);
+            return (
+              <View
+                key={ing.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: isActive ? colors.primary : colors.border,
+                  borderRadius: radius.md,
+                  padding: space.md,
+                  gap: space.md,
+                  backgroundColor: colors.surface,
+                }}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ingredient ${ing.name || 'untitled'}`}
+                  accessibilityState={{ expanded: isActive }}
+                  onPress={() => {
+                    setActiveIngredientId(isActive ? null : ing.id);
+                    if (
+                      showUnitPickerForIngredientId &&
+                      showUnitPickerForIngredientId !== ing.id
+                    ) {
+                      setShowUnitPickerForIngredientId(null);
+                    }
                   }}
+                  android_ripple={ripple(colors.ripple)}
+                  style={({ pressed }) => [
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: space.sm,
+                      minHeight: 32,
+                    },
+                    pressedStyle(pressed),
+                  ]}
                 >
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ingredient ${ing.name || 'untitled'}`}
-                    accessibilityState={{ expanded: isActive }}
-                    onPress={() => {
-                      setActiveIngredientId(isActive ? null : ing.id);
-                      if (
-                        showUnitPickerForIngredientId &&
-                        showUnitPickerForIngredientId !== ing.id
-                      ) {
-                        setShowUnitPickerForIngredientId(null);
-                      }
-                    }}
-                    android_ripple={ripple(colors.ripple)}
-                    style={({ pressed }) => [
-                      {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: space.sm,
-                        minHeight: 32,
-                      },
-                      pressedStyle(pressed),
-                    ]}
+                  <Text
+                    variant={isSectionHeading ? 'bodyStrong' : 'body'}
+                    tone={isSectionHeading ? 'accent' : 'primary'}
+                    style={{ flex: 1 }}
                   >
-                    <Text
-                      variant={isSectionHeading ? 'bodyStrong' : 'body'}
-                      tone={isSectionHeading ? 'accent' : 'primary'}
-                      style={{ flex: 1 }}
-                    >
-                      {formatIngredientPreview(ing)}
-                    </Text>
-                    <Ionicons
-                      name={isActive ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color={colors.textSecondary}
-                    />
-                  </Pressable>
+                    {formatIngredientPreview(ing)}
+                  </Text>
+                  <Ionicons
+                    name={isActive ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
 
-                  {isActive ? (
-                    <>
+                {isActive ? (
+                  <>
+                    <SwitchRow
+                      label="Section heading"
+                      description="No amount or unit"
+                      value={isSectionHeading}
+                      onValueChange={(asHeading) => {
+                        const next = [...recipe.ingredients];
+                        next[idx] = asHeading
+                          ? {
+                              ...ing,
+                              amountMode: 'exact',
+                              quantity: 0,
+                              unit: null,
+                              scalable: false,
+                              notes: undefined,
+                              isSectionHeading: true,
+                            }
+                          : {
+                              ...ing,
+                              amountMode: ing.amountMode === 'to_taste' ? 'exact' : ing.amountMode,
+                              quantity: ing.quantity > 0 ? ing.quantity : 1,
+                              unit: ing.unit ?? getDefaultIngredientUnit(ing.quantity > 0 ? ing.quantity : 1),
+                              scalable: true,
+                              isSectionHeading: false,
+                            };
+                        setRecipe({ ...recipe, ingredients: next });
+                        setShowUnitPickerForIngredientId(null);
+                        setIngredientQuantityInputs((prev) => {
+                          const updated = { ...prev };
+                          delete updated[ing.id];
+                          return updated;
+                        });
+                      }}
+                    />
+
+                    {!isSectionHeading ? (
                       <SwitchRow
-                        label="Section heading"
+                        label="To taste"
                         description="No amount or unit"
-                        value={isSectionHeading}
-                        onValueChange={(asHeading) => {
+                        value={ing.amountMode === 'to_taste'}
+                        onValueChange={(toTaste) => {
                           const next = [...recipe.ingredients];
-                          next[idx] = asHeading
+                          next[idx] = toTaste
                             ? {
                                 ...ing,
-                                amountMode: 'exact',
+                                amountMode: 'to_taste',
                                 quantity: 0,
                                 unit: null,
                                 scalable: false,
-                                notes: undefined,
-                                isSectionHeading: true,
-                              }
-                            : {
-                                ...ing,
-                                amountMode: ing.amountMode === 'to_taste' ? 'exact' : ing.amountMode,
-                                quantity: ing.quantity > 0 ? ing.quantity : 1,
-                                unit: ing.unit ?? getDefaultIngredientUnit(ing.quantity > 0 ? ing.quantity : 1),
-                                scalable: true,
                                 isSectionHeading: false,
-                              };
+                              }
+                            : { ...ing, amountMode: 'exact', scalable: true, isSectionHeading: false };
                           setRecipe({ ...recipe, ingredients: next });
                           setShowUnitPickerForIngredientId(null);
                           setIngredientQuantityInputs((prev) => {
@@ -614,146 +633,104 @@ export default function RecipeFormScreen() {
                           });
                         }}
                       />
+                    ) : null}
 
-                      {!isSectionHeading ? (
-                        <SwitchRow
-                          label="To taste"
-                          description="No amount or unit"
-                          value={ing.amountMode === 'to_taste'}
-                          onValueChange={(toTaste) => {
+                    {isSectionHeading ? (
+                      <TextInput
+                        accessibilityLabel="Section heading"
+                        value={ing.name}
+                        onChangeText={(t) => {
+                          const next = [...recipe.ingredients];
+                          next[idx] = { ...ing, name: t };
+                          setRecipe({ ...recipe, ingredients: next });
+                        }}
+                        onFocus={scrollFocusedInputIntoView}
+                        placeholder="Section title"
+                        placeholderTextColor={colors.textSecondary}
+                        style={inlineInputStyle}
+                      />
+                    ) : ing.amountMode === 'exact' ? (
+                      <View style={{ flexDirection: 'row', gap: space.sm }}>
+                        <TextInput
+                          accessibilityLabel="Ingredient quantity"
+                          value={ingredientQuantityInputs[ing.id] ?? String(ing.quantity)}
+                          onChangeText={(t) => {
+                            setIngredientQuantityInputs((prev) => ({ ...prev, [ing.id]: t }));
+                            const parsed = parseQuantityInput(t);
+                            if (parsed === null) return;
                             const next = [...recipe.ingredients];
-                            next[idx] = toTaste
-                              ? {
-                                  ...ing,
-                                  amountMode: 'to_taste',
-                                  quantity: 0,
-                                  unit: null,
-                                  scalable: false,
-                                  isSectionHeading: false,
-                                }
-                              : { ...ing, amountMode: 'exact', scalable: true, isSectionHeading: false };
+                            next[idx] = {
+                              ...ing,
+                              quantity: parsed,
+                              unit: getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                            };
                             setRecipe({ ...recipe, ingredients: next });
-                            setShowUnitPickerForIngredientId(null);
+                          }}
+                          onBlur={() => {
+                            const raw = ingredientQuantityInputs[ing.id];
+                            if (raw === undefined) return;
+                            const parsed = parseQuantityInput(raw);
+                            const next = [...recipe.ingredients];
+                            next[idx] = {
+                              ...ing,
+                              quantity: parsed ?? 0,
+                              unit:
+                                parsed === null
+                                  ? ing.unit
+                                  : getAutoAdjustedIngredientUnit(ing.unit, parsed),
+                            };
+                            setRecipe({ ...recipe, ingredients: next });
                             setIngredientQuantityInputs((prev) => {
                               const updated = { ...prev };
                               delete updated[ing.id];
                               return updated;
                             });
                           }}
-                        />
-                      ) : null}
-
-                      {isSectionHeading ? (
-                        <TextInput
-                          accessibilityLabel="Section heading"
-                          value={ing.name}
-                          onChangeText={(t) => {
-                            const next = [...recipe.ingredients];
-                            next[idx] = { ...ing, name: t };
-                            setRecipe({ ...recipe, ingredients: next });
-                          }}
                           onFocus={scrollFocusedInputIntoView}
-                          placeholder="Section title"
+                          keyboardType="decimal-pad"
+                          placeholder="Qty"
                           placeholderTextColor={colors.textSecondary}
-                          style={inlineInputStyle}
+                          style={[inlineInputStyle, { width: 72, textAlign: 'center' }]}
                         />
-                      ) : ing.amountMode === 'exact' ? (
-                        <View style={{ flexDirection: 'row', gap: space.sm }}>
-                          <TextInput
-                            accessibilityLabel="Ingredient quantity"
-                            value={ingredientQuantityInputs[ing.id] ?? String(ing.quantity)}
-                            onChangeText={(t) => {
-                              setIngredientQuantityInputs((prev) => ({ ...prev, [ing.id]: t }));
-                              const parsed = parseQuantityInput(t);
-                              if (parsed === null) return;
-                              const next = [...recipe.ingredients];
-                              next[idx] = {
-                                ...ing,
-                                quantity: parsed,
-                                unit: getAutoAdjustedIngredientUnit(ing.unit, parsed),
-                              };
-                              setRecipe({ ...recipe, ingredients: next });
-                            }}
-                            onBlur={() => {
-                              const raw = ingredientQuantityInputs[ing.id];
-                              if (raw === undefined) return;
-                              const parsed = parseQuantityInput(raw);
-                              const next = [...recipe.ingredients];
-                              next[idx] = {
-                                ...ing,
-                                quantity: parsed ?? 0,
-                                unit:
-                                  parsed === null
-                                    ? ing.unit
-                                    : getAutoAdjustedIngredientUnit(ing.unit, parsed),
-                              };
-                              setRecipe({ ...recipe, ingredients: next });
-                              setIngredientQuantityInputs((prev) => {
-                                const updated = { ...prev };
-                                delete updated[ing.id];
-                                return updated;
-                              });
-                            }}
-                            onFocus={scrollFocusedInputIntoView}
-                            keyboardType="decimal-pad"
-                            placeholder="Qty"
-                            placeholderTextColor={colors.textSecondary}
-                            style={[inlineInputStyle, { width: 72, textAlign: 'center' }]}
-                          />
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Unit: ${ing.unit ?? 'none'}`}
-                            accessibilityHint="Opens the unit picker"
-                            accessibilityState={{
-                              expanded: showUnitPickerForIngredientId === ing.id,
-                            }}
-                            onPress={() =>
-                              setShowUnitPickerForIngredientId((current) =>
-                                current === ing.id ? null : ing.id
-                              )
-                            }
-                            android_ripple={ripple(colors.ripple)}
-                            style={({ pressed }) => [
-                              inlineInputStyle,
-                              {
-                                minWidth: 84,
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                gap: space.xs,
-                                overflow: 'hidden',
-                              },
-                              pressedStyle(pressed),
-                            ]}
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Unit: ${ing.unit ?? 'none'}`}
+                          accessibilityHint="Opens the unit picker"
+                          accessibilityState={{
+                            expanded: showUnitPickerForIngredientId === ing.id,
+                          }}
+                          onPress={() =>
+                            setShowUnitPickerForIngredientId((current) =>
+                              current === ing.id ? null : ing.id
+                            )
+                          }
+                          android_ripple={ripple(colors.ripple)}
+                          style={({ pressed }) => [
+                            inlineInputStyle,
+                            {
+                              minWidth: 84,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: space.xs,
+                              overflow: 'hidden',
+                            },
+                            pressedStyle(pressed),
+                          ]}
+                        >
+                          <Text
+                            variant="body"
+                            tone={ing.unit ? 'primary' : 'secondary'}
+                            numberOfLines={1}
                           >
-                            <Text
-                              variant="body"
-                              tone={ing.unit ? 'primary' : 'secondary'}
-                              numberOfLines={1}
-                            >
-                              {ing.unit ?? 'Unit'}
-                            </Text>
-                            <Ionicons
-                              name="chevron-down"
-                              size={14}
-                              color={colors.textSecondary}
-                            />
-                          </Pressable>
-                          <TextInput
-                            accessibilityLabel="Ingredient name"
-                            value={ing.name}
-                            onChangeText={(t) => {
-                              const next = [...recipe.ingredients];
-                              next[idx] = { ...ing, name: t };
-                              setRecipe({ ...recipe, ingredients: next });
-                            }}
-                            onFocus={scrollFocusedInputIntoView}
-                            placeholder="Ingredient"
-                            placeholderTextColor={colors.textSecondary}
-                            style={[inlineInputStyle, { flex: 1 }]}
+                            {ing.unit ?? 'Unit'}
+                          </Text>
+                          <Ionicons
+                            name="chevron-down"
+                            size={14}
+                            color={colors.textSecondary}
                           />
-                        </View>
-                      ) : (
+                        </Pressable>
                         <TextInput
                           accessibilityLabel="Ingredient name"
                           value={ing.name}
@@ -765,264 +742,278 @@ export default function RecipeFormScreen() {
                           onFocus={scrollFocusedInputIntoView}
                           placeholder="Ingredient"
                           placeholderTextColor={colors.textSecondary}
-                          style={inlineInputStyle}
-                        />
-                      )}
-
-                      {ing.amountMode === 'exact' &&
-                      !isSectionHeading &&
-                      showUnitPickerForIngredientId === ing.id ? (
-                        <View
-                          style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}
-                        >
-                          {COMMON_INGREDIENT_UNITS.map((option) => (
-                            <Chip
-                              key={option.label}
-                              label={option.label}
-                              active={(ing.unit ?? null) === option.value}
-                              accessibilityLabel={`Use unit ${option.label}`}
-                              accessibilityHint="Sets this ingredient's unit"
-                              onPress={() => {
-                                const next = [...recipe.ingredients];
-                                next[idx] = { ...ing, unit: option.value };
-                                setRecipe({ ...recipe, ingredients: next });
-                                setShowUnitPickerForIngredientId(null);
-                              }}
-                            />
-                          ))}
-                        </View>
-                      ) : null}
-
-                      {ing.amountMode === 'exact' && !isSectionHeading ? (
-                        <SwitchRow
-                          label="Scales with servings"
-                          value={ing.scalable}
-                          onValueChange={(v) => {
-                            const next = [...recipe.ingredients];
-                            next[idx] = { ...ing, scalable: v };
-                            setRecipe({ ...recipe, ingredients: next });
-                          }}
-                        />
-                      ) : null}
-
-                      <View
-                        style={{
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Button
-                          label="Done"
-                          variant="ghost"
-                          accessibilityLabel="Done editing ingredient"
-                          onPress={() => {
-                            setActiveIngredientId(null);
-                            setShowUnitPickerForIngredientId(null);
-                          }}
-                        />
-                        <IconButton
-                          icon="trash-outline"
-                          variant="ghost"
-                          accessibilityLabel={`Remove ingredient ${ing.name || 'untitled'}`}
-                          onPress={() => removeIngredient(ing.id)}
-                          style={{ backgroundColor: colors.destructiveSoft }}
+                          style={[inlineInputStyle, { flex: 1 }]}
                         />
                       </View>
-                    </>
-                  ) : null}
-                </View>
-              );
-            })
-          : null}
+                    ) : (
+                      <TextInput
+                        accessibilityLabel="Ingredient name"
+                        value={ing.name}
+                        onChangeText={(t) => {
+                          const next = [...recipe.ingredients];
+                          next[idx] = { ...ing, name: t };
+                          setRecipe({ ...recipe, ingredients: next });
+                        }}
+                        onFocus={scrollFocusedInputIntoView}
+                        placeholder="Ingredient"
+                        placeholderTextColor={colors.textSecondary}
+                        style={inlineInputStyle}
+                      />
+                    )}
 
-        {errors.ingredients ? (
-          <Text variant="caption" tone="destructive">
-            {errors.ingredients}
-          </Text>
-        ) : null}
+                    {ing.amountMode === 'exact' &&
+                    !isSectionHeading &&
+                    showUnitPickerForIngredientId === ing.id ? (
+                      <View
+                        style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}
+                      >
+                        {COMMON_INGREDIENT_UNITS.map((option) => (
+                          <Chip
+                            key={option.label}
+                            label={option.label}
+                            active={(ing.unit ?? null) === option.value}
+                            accessibilityLabel={`Use unit ${option.label}`}
+                            accessibilityHint="Sets this ingredient's unit"
+                            onPress={() => {
+                              const next = [...recipe.ingredients];
+                              next[idx] = { ...ing, unit: option.value };
+                              setRecipe({ ...recipe, ingredients: next });
+                              setShowUnitPickerForIngredientId(null);
+                            }}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
 
-        <SectionHeader
-          label="Steps"
-          count={recipe.steps.length}
-          open={showSteps}
-          onToggle={() => setShowSteps((v) => !v)}
-          onAdd={addStep}
-          addLabel="Add step"
-          accessibilityLabel="Method section"
-        />
+                    {ing.amountMode === 'exact' && !isSectionHeading ? (
+                      <SwitchRow
+                        label="Scales with servings"
+                        value={ing.scalable}
+                        onValueChange={(v) => {
+                          const next = [...recipe.ingredients];
+                          next[idx] = { ...ing, scalable: v };
+                          setRecipe({ ...recipe, ingredients: next });
+                        }}
+                      />
+                    ) : null}
 
-        {showStepDragHint ? (
-          <Text variant="caption" tone="secondary">
-            Long press a step number and drag to reorder.
-          </Text>
-        ) : null}
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Button
+                        label="Done"
+                        variant="ghost"
+                        accessibilityLabel="Done editing ingredient"
+                        onPress={() => {
+                          setActiveIngredientId(null);
+                          setShowUnitPickerForIngredientId(null);
+                        }}
+                      />
+                      <IconButton
+                        icon="trash-outline"
+                        variant="ghost"
+                        accessibilityLabel={`Remove ingredient ${ing.name || 'untitled'}`}
+                        onPress={() => removeIngredient(ing.id)}
+                        style={{ backgroundColor: colors.destructiveSoft }}
+                      />
+                    </View>
+                  </>
+                ) : null}
+              </View>
+            );
+          })
+        : null}
 
-        {showSteps ? (
-          <DraggableFlatList
-            data={recipe.steps}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-            activationDistance={10}
-            onDragBegin={async () => {
-              if (showStepDragHint) {
-                setShowStepDragHint(false);
-                await setSeenStepDragHint(true);
-              }
-            }}
-            onDragEnd={({ data }) => {
-              setRecipe({ ...recipe, steps: normalizeStepOrder(data) });
-            }}
-            renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Step>) => {
-              const number = (getIndex() ?? 0) + 1;
-              const editing = activeStepId === item.id;
-              return (
-                <View style={{ marginBottom: space.sm, opacity: isActive ? 0.85 : 1 }}>
+      {errors.ingredients ? (
+        <Text variant="caption" tone="destructive">
+          {errors.ingredients}
+        </Text>
+      ) : null}
+
+      <SectionHeader
+        label="Steps"
+        count={recipe.steps.length}
+        open={showSteps}
+        onToggle={() => setShowSteps((v) => !v)}
+        onAdd={addStep}
+        addLabel="Add step"
+        accessibilityLabel="Method section"
+      />
+
+      {showStepDragHint ? (
+        <Text variant="caption" tone="secondary">
+          Long press a step number and drag to reorder.
+        </Text>
+      ) : null}
+
+      {showSteps ? (
+        <DraggableFlatList
+          data={recipe.steps}
+          keyExtractor={(item) => item.id}
+          scrollEnabled={false}
+          activationDistance={10}
+          onDragBegin={async () => {
+            if (showStepDragHint) {
+              setShowStepDragHint(false);
+              await setSeenStepDragHint(true);
+            }
+          }}
+          onDragEnd={({ data }) => {
+            setRecipe({ ...recipe, steps: normalizeStepOrder(data) });
+          }}
+          renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Step>) => {
+            const number = (getIndex() ?? 0) + 1;
+            const editing = activeStepId === item.id;
+            return (
+              <View style={{ marginBottom: space.sm, opacity: isActive ? 0.85 : 1 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Step ${number}, drag handle`}
+                  accessibilityHint="Long press and drag to reorder this step"
+                  onLongPress={drag}
+                  delayLongPress={180}
+                  style={({ pressed }) => [
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: space.sm,
+                      marginBottom: space.xs,
+                    },
+                    pressedStyle(pressed),
+                  ]}
+                >
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: radius.pill,
+                      backgroundColor: colors.primarySoft,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text variant="overline" tone="onAccentSoft">
+                      {number}
+                    </Text>
+                  </View>
+                  <Ionicons name="reorder-two-outline" size={16} color={colors.textSecondary} />
+                </Pressable>
+
+                {editing ? (
+                  <>
+                    <TextInput
+                      accessibilityLabel="Step instruction"
+                      multiline
+                      value={item.instruction}
+                      onChangeText={(text) => updateStepInstruction(item.id, text)}
+                      onFocus={scrollFocusedInputIntoView}
+                      placeholder="Describe the step."
+                      placeholderTextColor={colors.textSecondary}
+                      style={[
+                        inlineInputStyle,
+                        {
+                          minHeight: 88,
+                          borderColor: colors.primary,
+                          textAlignVertical: 'top',
+                        },
+                      ]}
+                    />
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginTop: space.xs,
+                      }}
+                    >
+                      <Button
+                        label="Done"
+                        variant="ghost"
+                        accessibilityLabel="Done editing step"
+                        onPress={() => setActiveStepId(null)}
+                      />
+                      <IconButton
+                        icon="trash-outline"
+                        variant="ghost"
+                        accessibilityLabel="Remove this step"
+                        onPress={() => removeStep(item.id)}
+                        style={{ backgroundColor: colors.destructiveSoft }}
+                      />
+                    </View>
+                  </>
+                ) : (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Step ${number}, drag handle`}
-                    accessibilityHint="Long press and drag to reorder this step"
-                    onLongPress={drag}
-                    delayLongPress={180}
+                    accessibilityLabel={`Edit step ${number}`}
+                    onPress={() => setActiveStepId(item.id)}
+                    android_ripple={ripple(colors.ripple)}
                     style={({ pressed }) => [
                       {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: space.sm,
-                        marginBottom: space.xs,
+                        minHeight: 52,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        borderRadius: radius.md,
+                        padding: space.md,
+                        justifyContent: 'center',
+                        backgroundColor: colors.surface,
+                        overflow: 'hidden',
                       },
                       pressedStyle(pressed),
                     ]}
                   >
-                    <View
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: radius.pill,
-                        backgroundColor: colors.primarySoft,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
+                    <Text
+                      variant="body"
+                      tone={item.instruction ? 'primary' : 'secondary'}
+                      numberOfLines={2}
                     >
-                      <Text variant="overline" tone="onAccentSoft">
-                        {number}
-                      </Text>
-                    </View>
-                    <Ionicons name="reorder-two-outline" size={16} color={colors.textSecondary} />
+                      {item.instruction || 'Tap to edit step'}
+                    </Text>
                   </Pressable>
-
-                  {editing ? (
-                    <>
-                      <TextInput
-                        accessibilityLabel="Step instruction"
-                        multiline
-                        value={item.instruction}
-                        onChangeText={(text) => updateStepInstruction(item.id, text)}
-                        onFocus={scrollFocusedInputIntoView}
-                        placeholder="Describe the step."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[
-                          inlineInputStyle,
-                          {
-                            minHeight: 88,
-                            borderColor: colors.primary,
-                            textAlignVertical: 'top',
-                          },
-                        ]}
-                      />
-                      <View
-                        style={{
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginTop: space.xs,
-                        }}
-                      >
-                        <Button
-                          label="Done"
-                          variant="ghost"
-                          accessibilityLabel="Done editing step"
-                          onPress={() => setActiveStepId(null)}
-                        />
-                        <IconButton
-                          icon="trash-outline"
-                          variant="ghost"
-                          accessibilityLabel="Remove this step"
-                          onPress={() => removeStep(item.id)}
-                          style={{ backgroundColor: colors.destructiveSoft }}
-                        />
-                      </View>
-                    </>
-                  ) : (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit step ${number}`}
-                      onPress={() => setActiveStepId(item.id)}
-                      android_ripple={ripple(colors.ripple)}
-                      style={({ pressed }) => [
-                        {
-                          minHeight: 52,
-                          borderWidth: 1,
-                          borderColor: colors.border,
-                          borderRadius: radius.md,
-                          padding: space.md,
-                          justifyContent: 'center',
-                          backgroundColor: colors.surface,
-                          overflow: 'hidden',
-                        },
-                        pressedStyle(pressed),
-                      ]}
-                    >
-                      <Text
-                        variant="body"
-                        tone={item.instruction ? 'primary' : 'secondary'}
-                        numberOfLines={2}
-                      >
-                        {item.instruction || 'Tap to edit step'}
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              );
-            }}
-          />
-        ) : null}
-
-        {errors.steps ? (
-          <Text variant="caption" tone="destructive">
-            {errors.steps}
-          </Text>
-        ) : null}
-
-        <ConfirmDialog
-          visible={showDiscardConfirm}
-          destructive
-          title="Discard changes?"
-          message="Your edits to this recipe have not been saved."
-          confirmLabel="Discard"
-          cancelLabel="Keep editing"
-          onConfirm={() => {
-            setShowDiscardConfirm(false);
-            setBaseline(null);
-            leaveScreen();
+                )}
+              </View>
+            );
           }}
-          onCancel={() => setShowDiscardConfirm(false)}
         />
-        <AppDialog
-          visible={dialog !== null}
-          title={dialog?.title ?? ''}
-          message={dialog?.message ?? ''}
-          actions={[
-            {
-              label: 'OK',
-              variant: 'primary',
-              onPress: () => dialog?.onOk?.(),
-            },
-          ]}
-          onClose={() => setDialog(null)}
-        />
-      </Screen>
-    </KeyboardAvoidingView>
+      ) : null}
+
+      {errors.steps ? (
+        <Text variant="caption" tone="destructive">
+          {errors.steps}
+        </Text>
+      ) : null}
+
+      <ConfirmDialog
+        visible={showDiscardConfirm}
+        destructive
+        title="Discard changes?"
+        message="Your edits to this recipe have not been saved."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={() => {
+          setShowDiscardConfirm(false);
+          setBaseline(null);
+          leaveScreen();
+        }}
+        onCancel={() => setShowDiscardConfirm(false)}
+      />
+      <AppDialog
+        visible={dialog !== null}
+        title={dialog?.title ?? ''}
+        message={dialog?.message ?? ''}
+        actions={[
+          {
+            label: 'OK',
+            variant: 'primary',
+            onPress: () => dialog?.onOk?.(),
+          },
+        ]}
+        onClose={() => setDialog(null)}
+      />
+    </Screen>
   );
 }
 
