@@ -63,13 +63,16 @@ export function SegmentedControl<T extends string>({
             android_ripple={ripple(colors.ripple)}
             style={({ pressed }) => [
               {
-                flex: 1,
+                // Sized to the label, then sharing what is left, so a long
+                // label is not squeezed into an equal third.
+                flexGrow: 1,
+                flexShrink: 1,
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: space.xs,
                 minHeight: control.sm,
-                paddingHorizontal: space.md,
+                paddingHorizontal: space.sm,
                 borderRadius: radius.pill,
                 backgroundColor: selected ? colors.surface : 'transparent',
                 overflow: 'hidden',

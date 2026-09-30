@@ -45,9 +45,10 @@ const LEAD_HEIGHT = 216;
 
 /** The three filters worth one tap. Everything else lives behind "More filters". */
 type QuickFilter = 'none' | 'want_to_cook' | 'favorite';
-const QUICK_FILTERS: { value: QuickFilter; label: string; icon?: 'flame' }[] = [
+// No flame icon here: at 360dp the three labels only fit as plain text.
+const QUICK_FILTERS: { value: QuickFilter; label: string }[] = [
   { value: 'none', label: 'All' },
-  { value: 'want_to_cook', label: 'Want to cook', icon: 'flame' },
+  { value: 'want_to_cook', label: 'Want to cook' },
   { value: 'favorite', label: 'Favourites' },
 ];
 
@@ -596,7 +597,7 @@ const RecipeTile = memo(function RecipeTile({
       style={({ pressed }) => [
         {
           flex: grid ? 0.5 : 1,
-          marginBottom: space.xl,
+          marginBottom: space.md,
           borderRadius: radius.lg,
           overflow: 'hidden',
         },
@@ -630,7 +631,15 @@ const RecipeTile = memo(function RecipeTile({
         )}
       </View>
 
-      <View style={{ paddingTop: space.sm, paddingHorizontal: space.xxs, gap: space.xxs }}>
+      {/* Padded clear of the tile's rounded bottom corners, which clip the ripple. */}
+      <View
+        style={{
+          paddingTop: space.sm,
+          paddingHorizontal: space.sm,
+          paddingBottom: space.md,
+          gap: space.xxs,
+        }}
+      >
         <Text variant="subheading" numberOfLines={2}>
           {item.wantToCook ? (
             <Ionicons name="flame" size={15} color={colors.primary} />
@@ -639,7 +648,7 @@ const RecipeTile = memo(function RecipeTile({
           {item.title || 'Untitled'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
-          <Text variant="caption" tone="secondary" numberOfLines={1} style={{ flexShrink: 1 }}>
+          <Text variant="caption" tone="secondary" numberOfLines={2} style={{ flexShrink: 1 }}>
             {item.cuisine ? `${item.cuisine} · ` : ''}
             {describeCooks(item.cookCount)}
           </Text>
