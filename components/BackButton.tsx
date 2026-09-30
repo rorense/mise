@@ -42,7 +42,7 @@ export function BackButton({
       }}
     >
       <IconButton
-        icon="chevron-back"
+        icon="arrow-back"
         accessibilityLabel="Go back"
         onPress={handlePress}
         variant={overImage ? 'onImage' : 'surface'}

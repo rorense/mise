@@ -1,14 +1,16 @@
 import { getDatabase } from '@/db/client';
 import { configureGlobalNotificationHandler } from '@/lib/timerNotifications';
+import { StepTimerProvider } from '@/lib/ui/stepTimer';
 import { palette } from '@/theme/colors';
 import { ThemeProvider as AppThemeProvider, useTheme } from '@/theme/ThemeContext';
 import { fontFamily, space, typeScale } from '@/theme/tokens';
 import {
-  DMSans_400Regular,
-  DMSans_500Medium,
-  DMSans_700Bold,
-} from '@expo-google-fonts/dm-sans';
-import { Lora_400Regular, Lora_700Bold } from '@expo-google-fonts/lora';
+  Archivo_300Light,
+  Archivo_400Regular,
+  Archivo_500Medium,
+  Archivo_600SemiBold,
+  Archivo_700Bold,
+} from '@expo-google-fonts/archivo';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import {
   DarkTheme as NavigationDarkTheme,
@@ -55,7 +57,7 @@ function ThemedStack() {
             headerShown: false,
             headerStyle: { backgroundColor: colors.surface },
             headerTintColor: colors.textPrimary,
-            headerTitleStyle: { fontFamily: fontFamily.serifBold },
+            headerTitleStyle: { fontFamily: fontFamily.sansSemiBold },
             contentStyle: { backgroundColor: colors.background },
           }}
         >
@@ -117,11 +119,11 @@ function InitialLoadingScreen({ dark }: { dark: boolean }) {
 export default function RootLayout() {
   const system = useColorScheme();
   const [loaded] = useFonts({
-    Lora_400Regular,
-    Lora_700Bold,
-    DMSans_400Regular,
-    DMSans_500Medium,
-    DMSans_700Bold,
+    Archivo_300Light,
+    Archivo_400Regular,
+    Archivo_500Medium,
+    Archivo_600SemiBold,
+    Archivo_700Bold,
   });
   const [dbReady, setDbReady] = useState(false);
 
@@ -161,9 +163,11 @@ export default function RootLayout() {
     >
       {appReady ? (
         <AppThemeProvider>
-          <BottomSheetModalProvider>
-            <ThemedStack />
-          </BottomSheetModalProvider>
+          <StepTimerProvider>
+            <BottomSheetModalProvider>
+              <ThemedStack />
+            </BottomSheetModalProvider>
+          </StepTimerProvider>
         </AppThemeProvider>
       ) : (
         <InitialLoadingScreen dark={bootDark} />

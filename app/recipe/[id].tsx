@@ -10,8 +10,10 @@ import {
   IconButton,
   ImageScrim,
   ScreenLoading,
+  SegmentedControl,
   Text,
   TextField,
+  type SegmentedOption,
 } from '@/components/ui';
 import { pressedStyle, ripple } from '@/components/ui/press';
 import {
@@ -37,7 +39,7 @@ import {
   renderStepInstruction,
   splitIngredientSections,
 } from '@/domain/scaling';
-import { normalizeServings, shouldCommitSliderTick } from '@/domain/slider';
+import { normalizeServings } from '@/domain/slider';
 import { suggestRecipeAdjustmentsFromCookNote } from '@/lib/ai/cookLogAdjustments';
 import { describeAiUnavailable, getAiCredentials } from '@/lib/aiConfig';
 import { newId } from '@/lib/id';
@@ -48,21 +50,17 @@ import {
 import { getAiEnabled } from '@/lib/secrets';
 import { extractStepTimerPresets, formatTimerRemaining } from '@/lib/stepTimers';
 import {
-  ensureTimerNotificationPermission,
-  presentTimerDoneNotification,
-} from '@/lib/timerNotifications';
-import {
   useKeyboardSafeScroll,
 } from '@/lib/ui/keyboardSafe';
+import { useStepTimer } from '@/lib/ui/stepTimer';
 import { useTheme } from '@/theme/ThemeContext';
-import { elevation, radius, space } from '@/theme/tokens';
+import { control, elevation, radius, space } from '@/theme/tokens';
 import type { Recipe, RecipeAdjustment } from '@/types/recipe';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
-import Slider from '@react-native-community/slider';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -75,7 +73,28 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const HERO_HEIGHT = 280;
+const HERO_HEIGHT = 300;
+/** The docked "Start cooking" bar, excluding the bottom inset. */
+const DOCK_HEIGHT = control.lg + space.md * 2;
+/** Wide enough for "1 ½ tbsp" without wrapping at default font scale. */
+const QUANTITY_WIDTH = 84;
+const STEP_BADGE = control.sm - space.sm;
+/** Height of the floating active-timer bar plus its gap. */
+const TIMER_BAR_CLEARANCE = 76;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+type RecipeSection = 'ingredients' | 'method' | 'journal';
+const SECTION_OPTIONS: SegmentedOption<RecipeSection>[] = [
+  { value: 'ingredients', label: 'Ingredients' },
+  { value: 'method', label: 'Method' },
+  { value: 'journal', label: 'Journal' },
+];
+
+/** "21 Sep": fixed English month names, so it reads the same on every device locale. */
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
 /** Reading mode bumps body copy for arm's-length legibility at the stove. */
 const READ_MODE_BODY = { fontSize: 17, lineHeight: 27 } as const;
 
@@ -86,8 +105,6 @@ export default function RecipeDetailScreen() {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<RecipeChatSheetRef>(null);
   const { scrollRef, scrollFocusedInputIntoView } = useKeyboardSafeScroll<ScrollView>();
-  const lastSliderCommitAtRef = useRef(0);
-  const isSlidingRef = useRef(false);
   const loadSeqRef = useRef(0);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [servings, setServings] = useState<number | null>(null);
@@ -100,9 +117,8 @@ export default function RecipeDetailScreen() {
   const [readMode, setReadMode] = useState(false);
   const [checklistMode, setChecklistMode] = useState(false);
   const [checkedIngredientIds, setCheckedIngredientIds] = useState<string[]>([]);
-  const [showIngredients, setShowIngredients] = useState(true);
-  const [showMethod, setShowMethod] = useState(true);
-  const [showCookJournal, setShowCookJournal] = useState(true);
+  const [section, setSection] = useState<RecipeSection>('ingredients');
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{
     title: string;
@@ -112,14 +128,12 @@ export default function RecipeDetailScreen() {
   const [pendingAdjustments, setPendingAdjustments] = useState<RecipeAdjustment[]>([]);
   const [isLoggingCook, setIsLoggingCook] = useState(false);
   const [isUpdatingTags, setIsUpdatingTags] = useState(false);
-  const [activeTimer, setActiveTimer] = useState<{
-    stepId: string;
-    label: string;
-    remainingSeconds: number;
-    isPaused: boolean;
-    endsAtMs: number | null;
-  } | null>(null);
-  const hasRequestedNotificationPermissionRef = useRef(false);
+  const {
+    timer: activeTimer,
+    start: startStepTimer,
+    togglePause: toggleTimerPause,
+    stop: stopTimer,
+  } = useStepTimer();
   const [aiEnabled, setAiEnabled] = useState(false);
   const shouldBackToHome = fromImport === '1' || fromImport === 'true';
 
@@ -170,57 +184,6 @@ export default function RecipeDetailScreen() {
       };
     }, [])
   );
-
-  // The updater stays pure: React may call it more than once, and firing the
-  // notification from inside it produced duplicate alerts. Depending on
-  // endsAtMs rather than the whole timer object also stops the interval being
-  // torn down and rebuilt on every displayed second.
-  const timerEndsAtMs = activeTimer?.isPaused ? null : activeTimer?.endsAtMs ?? null;
-  const timerLabel = activeTimer?.label ?? '';
-
-  useEffect(() => {
-    if (timerEndsAtMs === null) return;
-    const handle = setInterval(() => {
-      const remainingSeconds = Math.max(
-        0,
-        Math.ceil((timerEndsAtMs - Date.now()) / 1000)
-      );
-      if (remainingSeconds <= 0) {
-        // Stop first: the notification and dialog must fire once, and firing
-        // them from inside the state updater made React's double-invoke
-        // produce duplicates.
-        clearInterval(handle);
-        setActiveTimer(null);
-        void presentTimerDoneNotification(timerLabel);
-        setDialog({
-          title: 'Timer done',
-          message: `${timerLabel} finished.`,
-          actions: [{ label: 'OK', variant: 'primary' }],
-        });
-        return;
-      }
-      setActiveTimer((current) =>
-        current && current.remainingSeconds !== remainingSeconds
-          ? { ...current, remainingSeconds }
-          : current
-      );
-    }, 250);
-    return () => clearInterval(handle);
-  }, [timerEndsAtMs, timerLabel]);
-
-  const startStepTimer = useCallback(async (stepId: string, label: string, seconds: number) => {
-    if (!hasRequestedNotificationPermissionRef.current) {
-      hasRequestedNotificationPermissionRef.current = true;
-      void ensureTimerNotificationPermission();
-    }
-    setActiveTimer({
-      stepId,
-      label,
-      remainingSeconds: seconds,
-      isPaused: false,
-      endsAtMs: Date.now() + seconds * 1000,
-    });
-  }, []);
 
   if (isLoading) {
     return (
@@ -615,6 +578,49 @@ export default function RecipeDetailScreen() {
     await persistTags(nextTags);
   };
 
+  const sortedSteps = [...recipe.steps].sort((a, b) => a.order - b.order);
+  const lastCooked = recipe.cookLogs[0];
+  const pending = pendingAdjustments[0];
+  const pendingFrom = pending
+    ? recipe.cookLogs.find((log) => log.id === pending.cookLogId)
+    : undefined;
+  // Review and Ignore act on one adjustment at a time, so count only its changes.
+  const pendingChangeCount = pending?.suggestions.length ?? 0;
+  // Reading mode is for the bench, where the journal is noise.
+  const visibleSection: RecipeSection =
+    readMode && section === 'journal' ? 'ingredients' : section;
+  // The journal is for after the cook, and the dock would crowd its note field.
+  const canCook = sortedSteps.length > 0 && visibleSection !== 'journal';
+  const dockHeight = canCook ? DOCK_HEIGHT : 0;
+
+  const changeServings = (delta: number) => {
+    const next = normalizeServings(servings + delta, sliderMax);
+    if (next === servings) return;
+    setServings(next);
+    void setRecipeServingsOverride(recipe.id, next);
+  };
+
+  const openMainImageDialog = () =>
+    setDialog({
+      title: 'Main image',
+      message: 'Choose how to set the recipe main image.',
+      actions: [
+        { label: 'Cancel' },
+        {
+          label: 'Clear',
+          onPress: async () => {
+            await setRecipeMainImage(recipe.id, undefined);
+            await reload();
+          },
+        },
+        {
+          label: 'Photo library',
+          onPress: () => setMainImageFromLibrary(),
+        },
+        { label: 'Camera', onPress: () => setMainImageFromCamera() },
+      ],
+    });
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -628,9 +634,17 @@ export default function RecipeDetailScreen() {
         <ScrollView
           ref={scrollRef}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+          contentContainerStyle={{
+            paddingBottom:
+              insets.bottom +
+              dockHeight +
+              space.xxxl +
+              (aiEnabled ? control.lg : 0) +
+              (activeTimer ? TIMER_BAR_CLEARANCE : 0),
+          }}
         >
-          <View style={{ height: HERO_HEIGHT, backgroundColor: colors.surfaceMuted }}>
+          {/* The photo runs under the rounded top of the body sheet. */}
+          <View style={{ height: HERO_HEIGHT + radius.xl, backgroundColor: colors.surfaceMuted }}>
             {hero ? (
               <Pressable
                 accessibilityRole="imagebutton"
@@ -650,240 +664,301 @@ export default function RecipeDetailScreen() {
                 <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
               </View>
             )}
-            {/* Darkens the top of the photo so the floating back arrow stays
+            {/* Darkens the top of the photo so the floating buttons stay
                 visible over a pale image. */}
             {hero ? <ImageScrim from="top" height={112} /> : null}
-            <IconButton
-              icon="camera-outline"
-              accessibilityLabel="Change main photo"
-              accessibilityHint="Set, replace, or clear the recipe photo"
-              variant={hero ? 'onImage' : 'surface'}
-              onPress={() =>
-                setDialog({
-                  title: 'Main image',
-                  message: 'Choose how to set the recipe main image.',
-                  actions: [
-                    { label: 'Cancel' },
-                    {
-                      label: 'Clear',
-                      onPress: async () => {
-                        await setRecipeMainImage(recipe.id, undefined);
-                        await reload();
-                      },
-                    },
-                    {
-                      label: 'Photo library',
-                      onPress: () => setMainImageFromLibrary(),
-                    },
-                    { label: 'Camera', onPress: () => setMainImageFromCamera() },
-                  ],
-                })
-              }
-              style={{ position: 'absolute', right: space.md, bottom: space.md }}
-            />
-          </View>
-
-          <View style={{ padding: space.xl, gap: space.lg }}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
-              <Text variant="title" accessibilityRole="header" style={{ flex: 1 }}>
-                {recipe.title}
-              </Text>
+            {/* Inside the hero so they scroll away with the photo instead of
+                floating over the title row and its buttons. */}
+            <View
+              style={{
+                position: 'absolute',
+                right: space.lg,
+                top: insets.top + space.md,
+                flexDirection: 'row',
+                gap: space.sm,
+              }}
+            >
               <IconButton
-                icon={readMode ? 'book' : 'book-outline'}
-                accessibilityLabel="Reading mode"
-                accessibilityHint="Hides everything except ingredients and method"
-                accessibilityState={{ selected: readMode }}
-                variant={readMode ? 'accent' : 'surface'}
-                onPress={() => setReadMode((v) => !v)}
+                icon={recipe.wantToCook ? 'flame' : 'flame-outline'}
+                accessibilityLabel="Want to cook"
+                accessibilityHint={
+                  recipe.wantToCook ? 'Removes the want-to-cook mark' : 'Marks as want to cook'
+                }
+                accessibilityState={{ selected: recipe.wantToCook }}
+                variant={hero ? 'onImage' : 'surface'}
+                onPress={toggleWantToCook}
               />
               <IconButton
-                icon="ellipsis-horizontal"
-                accessibilityLabel="Recipe actions"
-                accessibilityHint="Edit, share, version history, archive"
-                onPress={openQuickActions}
+                icon={recipe.isFavorite ? 'star' : 'star-outline'}
+                accessibilityLabel="Favourite"
+                accessibilityHint={
+                  recipe.isFavorite ? 'Removes the favourite mark' : 'Marks as favourite'
+                }
+                accessibilityState={{ selected: recipe.isFavorite }}
+                variant={hero ? 'onImage' : 'surface'}
+                onPress={toggleFavorite}
+              />
+              <IconButton
+                icon="camera-outline"
+                accessibilityLabel="Change main photo"
+                accessibilityHint="Set, replace, or clear the recipe photo"
+                variant={hero ? 'onImage' : 'surface'}
+                onPress={openMainImageDialog}
               />
             </View>
+          </View>
 
-            {!readMode && recipe.sourceUrl ? (
-              <Text
-                variant="label"
-                tone="accent"
-                accessibilityRole="link"
-                accessibilityLabel="Open original recipe source in browser"
-                onPress={() => Linking.openURL(recipe.sourceUrl)}
-              >
-                Open source ↗
-              </Text>
-            ) : null}
+          <View
+            style={{
+              marginTop: -radius.xl,
+              borderTopLeftRadius: radius.xl,
+              borderTopRightRadius: radius.xl,
+              backgroundColor: colors.background,
+              paddingHorizontal: space.lg,
+              paddingTop: space.xxl,
+              gap: space.lg,
+            }}
+          >
+            <View style={{ gap: space.md }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+                <Text variant="title" accessibilityRole="header" style={{ flex: 1 }}>
+                  {recipe.title}
+                </Text>
+                <IconButton
+                  icon={readMode ? 'book' : 'book-outline'}
+                  accessibilityLabel="Reading mode"
+                  accessibilityHint="Hides everything except ingredients and method"
+                  accessibilityState={{ selected: readMode }}
+                  variant={readMode ? 'accent' : 'surface'}
+                  onPress={() => setReadMode((v) => !v)}
+                />
+                <IconButton
+                  icon="ellipsis-horizontal"
+                  accessibilityLabel="Recipe actions"
+                  accessibilityHint="Edit, share, version history, archive"
+                  onPress={openQuickActions}
+                />
+              </View>
 
-            {!readMode ? (
-              <Text variant="caption" tone="secondary">
-                {recipe.cuisine ? `${recipe.cuisine} · ` : ''}
-                {recipe.tags.length > 0 ? recipe.tags.join(' · ') : 'No tags yet'}
-              </Text>
-            ) : null}
-
-            {!readMode ? (
-              <>
-                {recipe.tags.length > 0 ? (
-                  <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-                    {recipe.tags.map((tag) => (
-                      <Chip
-                        key={tag}
-                        label={tag}
-                        icon="close"
-                        accessibilityLabel={`Tag ${tag}`}
-                        accessibilityHint="Removes this tag"
-                        onPress={() => {
-                          if (!isUpdatingTags) void removeTag(tag);
-                        }}
-                        style={{ opacity: isUpdatingTags ? 0.6 : 1 }}
-                      />
-                    ))}
-                  </View>
-                ) : null}
-
-                <TextField
-                  accessibilityLabel="Add tags, comma separated"
-                  value={tagDraft}
-                  onChangeText={setTagDraft}
-                  onSubmitEditing={() => {
-                    void addTagsFromDraft();
-                  }}
-                  editable={!isUpdatingTags}
-                  placeholder="Add tags (comma separated)"
-                  returnKeyType="done"
-                  trailing={
-                    <IconButton
-                      icon="add"
-                      accessibilityLabel="Add tags"
-                      variant="accent"
-                      size={32}
-                      iconSize={18}
-                      disabled={isUpdatingTags}
-                      onPress={() => {
-                        void addTagsFromDraft();
-                      }}
+              {!readMode ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.xs }}>
+                  {recipe.cuisine ? <MetaPill label={recipe.cuisine} /> : null}
+                  <MetaPill
+                    label={
+                      recipe.cookLogs.length === 0
+                        ? 'Never cooked'
+                        : `Cooked ${recipe.cookLogs.length}×`
+                    }
+                  />
+                  {lastCooked ? (
+                    <MetaPill label={`Last ${formatShortDate(lastCooked.cookedAt)}`} />
+                  ) : null}
+                  {recipe.sourceUrl ? (
+                    <Chip
+                      label="Source"
+                      icon="open-outline"
+                      accessibilityLabel="Open original recipe source in browser"
+                      accessibilityHint="Opens in your browser"
+                      onPress={() => Linking.openURL(recipe.sourceUrl)}
                     />
-                  }
-                />
-
-                <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-                  <Chip
-                    label="Favorite"
-                    icon={recipe.isFavorite ? 'star' : 'star-outline'}
-                    active={recipe.isFavorite}
-                    accessibilityLabel="Favourite"
-                    accessibilityHint={
-                      recipe.isFavorite ? 'Removes the favourite mark' : 'Marks as favourite'
-                    }
-                    onPress={toggleFavorite}
-                  />
-                  <Chip
-                    label="Want to cook"
-                    icon={recipe.wantToCook ? 'flame' : 'flame-outline'}
-                    active={recipe.wantToCook}
-                    accessibilityLabel="Want to cook"
-                    accessibilityHint={
-                      recipe.wantToCook ? 'Removes the want-to-cook mark' : 'Marks as want to cook'
-                    }
-                    onPress={toggleWantToCook}
-                  />
+                  ) : null}
                 </View>
-              </>
-            ) : null}
-
-            <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-              <Chip
-                label="Checklist"
-                icon={checklistMode ? 'checkbox' : 'checkbox-outline'}
-                active={checklistMode}
-                accessibilityLabel="Checklist mode"
-                accessibilityHint="Lets you tick off ingredients as you go"
-                onPress={() => setChecklistMode((v) => !v)}
-              />
-              {checklistMode ? (
-                <Chip
-                  label="Reset checks"
-                  icon="refresh-outline"
-                  accessibilityLabel="Clear ticked ingredients"
-                  accessibilityHint="Unticks every ingredient"
-                  onPress={() => setCheckedIngredientIds([])}
-                />
               ) : null}
             </View>
 
-            <Card level={1} style={{ gap: space.xs }}>
+            {!readMode ? (
+              <View style={{ gap: space.sm }}>
+                <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+                  {recipe.tags.map((tag) => (
+                    <Chip
+                      key={tag}
+                      label={tag}
+                      icon="close"
+                      accessibilityLabel={`Tag ${tag}`}
+                      accessibilityHint="Removes this tag"
+                      onPress={() => {
+                        if (!isUpdatingTags) void removeTag(tag);
+                      }}
+                      style={{ opacity: isUpdatingTags ? 0.6 : 1 }}
+                    />
+                  ))}
+                  <Chip
+                    label={tagEditorOpen ? 'Done' : 'Tag'}
+                    icon={tagEditorOpen ? 'checkmark' : 'add'}
+                    active={tagEditorOpen}
+                    accessibilityLabel={tagEditorOpen ? 'Close tag editor' : 'Edit tags'}
+                    accessibilityHint={tagEditorOpen ? undefined : 'Shows a field for new tags'}
+                    onPress={() => setTagEditorOpen((v) => !v)}
+                  />
+                </View>
+                {tagEditorOpen ? (
+                  <TextField
+                    accessibilityLabel="Add tags, comma separated"
+                    value={tagDraft}
+                    onChangeText={setTagDraft}
+                    onSubmitEditing={() => {
+                      void addTagsFromDraft();
+                    }}
+                    editable={!isUpdatingTags}
+                    autoFocus
+                    placeholder="Add tags (comma separated)"
+                    returnKeyType="done"
+                    trailing={
+                      <IconButton
+                        icon="add"
+                        accessibilityLabel="Add tags"
+                        variant="accent"
+                        size={32}
+                        iconSize={18}
+                        disabled={isUpdatingTags}
+                        onPress={() => {
+                          void addTagsFromDraft();
+                        }}
+                      />
+                    }
+                  />
+                ) : null}
+              </View>
+            ) : null}
+
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: space.sm,
+                paddingLeft: space.xl,
+                paddingRight: space.sm,
+                paddingVertical: space.sm,
+                borderRadius: radius.pill,
+                backgroundColor: colors.surface,
+                borderWidth: resolved === 'dark' ? 1 : 0,
+                borderColor: colors.border,
+                ...elevation(1, resolved),
+              }}
+            >
+              <Text variant="body" tone="secondary" style={{ flex: 1 }}>
+                Serves
+              </Text>
+              <IconButton
+                icon="remove"
+                accessibilityLabel="Fewer servings"
+                size={control.md}
+                disabled={servings <= 1}
+                onPress={() => changeServings(-1)}
+              />
+              <Text
+                variant="numeral"
+                accessibilityLabel={`Servings ${servings}`}
+                accessibilityLiveRegion="polite"
+                style={{ minWidth: control.lg, textAlign: 'center' }}
+              >
+                {servings}
+              </Text>
+              <IconButton
+                icon="add"
+                accessibilityLabel="More servings"
+                size={control.md}
+                disabled={servings >= sliderMax}
+                onPress={() => changeServings(1)}
+              />
+            </View>
+
+            {!readMode && pending ? (
               <View
                 style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'baseline',
+                  backgroundColor: colors.primarySoft,
+                  borderRadius: radius.lg,
+                  padding: space.lg,
+                  gap: space.sm,
                 }}
               >
-                <Text variant="overline" tone="secondary">
-                  Serves
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
+                  <Ionicons name="sparkles" size={16} color={colors.onPrimarySoft} />
+                  <Text variant="captionStrong" tone="onAccentSoft">
+                    {pendingFrom
+                      ? `From your cook on ${formatShortDate(pendingFrom.cookedAt)}`
+                      : 'From a recent cook'}
+                  </Text>
+                </View>
+                {pendingFrom?.notes ? (
+                  <Text variant="body" numberOfLines={3}>
+                    “{pendingFrom.notes}”
+                  </Text>
+                ) : null}
+                <Text variant="bodyStrong">
+                  {pendingChangeCount === 1
+                    ? '1 suggested change to this recipe'
+                    : `${pendingChangeCount} suggested changes to this recipe`}
                 </Text>
-                <Text variant="title" tone="accent">
-                  {Math.round(servings)}
-                </Text>
+                <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.xs }}>
+                  <Button
+                    label="Review"
+                    icon="checkmark"
+                    accessibilityLabel={`Review ${pendingChangeCount} suggested changes`}
+                    onPress={() => router.push(`/recipe/adjustments/${pending.id}`)}
+                  />
+                  <Button
+                    label="Ignore"
+                    variant="secondary"
+                    accessibilityHint="Dismisses these suggestions"
+                    onPress={async () => {
+                      await ignoreRecipeAdjustment(pending.id);
+                      await reload();
+                    }}
+                    style={{ backgroundColor: colors.surface }}
+                  />
+                </View>
               </View>
-              <Slider
-                accessibilityLabel="Servings"
-                minimumValue={1}
-                maximumValue={sliderMax}
-                step={1}
-                value={servings}
-                onSlidingStart={() => {
-                  isSlidingRef.current = true;
-                }}
-                onValueChange={(value) => {
-                  if (!isSlidingRef.current) {
-                    return;
-                  }
-                  const now = Date.now();
-                  if (!shouldCommitSliderTick(lastSliderCommitAtRef.current, now)) {
-                    return;
-                  }
-                  lastSliderCommitAtRef.current = now;
-                  const nextServings = normalizeServings(value, sliderMax);
-                  setServings(nextServings);
-                }}
-                onSlidingComplete={(value) => {
-                  isSlidingRef.current = false;
-                  lastSliderCommitAtRef.current = Date.now();
-                  const nextServings = normalizeServings(value, sliderMax);
-                  setServings(nextServings);
-                  void setRecipeServingsOverride(recipe.id, nextServings);
-                }}
-                minimumTrackTintColor={colors.primary}
-                maximumTrackTintColor={colors.borderStrong}
-                thumbTintColor={colors.primary}
-              />
-            </Card>
+            ) : null}
 
-            <SectionToggle
-              label="Ingredients"
-              open={showIngredients}
-              onToggle={() => setShowIngredients((v) => !v)}
-              accessibilityLabel="Ingredients section"
-              colors={colors}
+            <SegmentedControl
+              accessibilityLabel="Recipe sections"
+              value={visibleSection}
+              onChange={setSection}
+              options={
+                readMode
+                  ? SECTION_OPTIONS.filter((option) => option.value !== 'journal')
+                  : SECTION_OPTIONS
+              }
             />
-            {readMode || showIngredients
-              ? ingredientSections.map((section, sectionIdx) => (
-                  <View
-                    key={`section-${section.title ?? 'default'}-${sectionIdx}`}
-                    style={{ gap: space.xs }}
-                  >
-                    {section.title ? (
-                      <Text variant="overline" tone="secondary" style={{ marginTop: space.sm }}>
-                        {section.title}
+
+            {visibleSection === 'ingredients' ? (
+              <View style={{ gap: space.sm }}>
+                <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+                  <Chip
+                    label="Checklist"
+                    icon={checklistMode ? 'checkbox' : 'checkbox-outline'}
+                    active={checklistMode}
+                    accessibilityLabel="Checklist mode"
+                    accessibilityHint="Lets you tick off ingredients as you go"
+                    onPress={() => setChecklistMode((v) => !v)}
+                  />
+                  {checklistMode ? (
+                    <Chip
+                      label="Reset checks"
+                      icon="refresh-outline"
+                      accessibilityLabel="Clear ticked ingredients"
+                      accessibilityHint="Unticks every ingredient"
+                      onPress={() => setCheckedIngredientIds([])}
+                    />
+                  ) : null}
+                </View>
+                {ingredientSections.map((group, groupIdx) => (
+                  <View key={`section-${group.title ?? 'default'}-${groupIdx}`}>
+                    {group.title ? (
+                      <Text
+                        variant="overline"
+                        tone="secondary"
+                        style={{ marginTop: space.md, marginBottom: space.xs }}
+                      >
+                        {group.title}
                       </Text>
                     ) : null}
-                    {section.ingredients.map((ing) => {
+                    {group.ingredients.map((ing, ingIdx) => {
                       const amount = formatIngredientAmount(ing, recipe.baseServings, servings);
                       const checked = checkedIngredientIds.includes(ing.id);
                       const needsTasteHint = ingredientShowsAdjustToTasteHint(ing);
+                      const strike = checked ? ({ textDecorationLine: 'line-through' } as const) : null;
                       return (
                         <Pressable
                           key={ing.id}
@@ -904,12 +979,13 @@ export default function RecipeDetailScreen() {
                             {
                               flexDirection: 'row',
                               alignItems: 'center',
-                              gap: space.sm,
+                              gap: space.md,
                               // Checklist rows are tap targets, so they get real
                               // height; the read-only list stays compact.
-                              minHeight: checklistMode ? 40 : undefined,
-                              paddingVertical: checklistMode ? 0 : space.xxs,
-                              borderRadius: radius.sm,
+                              minHeight: checklistMode ? control.md : undefined,
+                              paddingVertical: space.md,
+                              borderTopWidth: ingIdx === 0 ? 0 : 1,
+                              borderTopColor: colors.border,
                             },
                             checklistMode ? pressedStyle(pressed) : undefined,
                           ]}
@@ -920,28 +996,26 @@ export default function RecipeDetailScreen() {
                               size={20}
                               color={checked ? colors.primary : colors.textSecondary}
                             />
-                          ) : (
-                            <View
-                              style={{
-                                width: 4,
-                                height: 4,
-                                borderRadius: 2,
-                                backgroundColor: colors.textSecondary,
-                              }}
-                            />
-                          )}
+                          ) : null}
+                          {/* A fixed quantity column: the eye learns where
+                              amounts live and never has to hunt for them. */}
                           <Text
-                            variant={readMode ? 'bodyStrong' : 'body'}
+                            variant="bodyStrong"
                             tone={checked ? 'secondary' : 'primary'}
                             style={[
                               readMode ? READ_MODE_BODY : null,
-                              {
-                                flex: 1,
-                                textDecorationLine: checked ? 'line-through' : 'none',
-                              },
+                              { width: QUANTITY_WIDTH, textAlign: 'right' },
+                              strike,
                             ]}
                           >
-                            {amount} {ing.name}
+                            {amount}
+                          </Text>
+                          <Text
+                            variant="body"
+                            tone={checked ? 'secondary' : 'primary'}
+                            style={[readMode ? READ_MODE_BODY : null, { flex: 1 }, strike]}
+                          >
+                            {ing.name}
                           </Text>
                           {needsTasteHint ? (
                             <Text
@@ -949,191 +1023,82 @@ export default function RecipeDetailScreen() {
                               tone="secondary"
                               accessibilityLabel="Adjust to taste"
                             >
-                              ⚠ to taste
+                              to taste
                             </Text>
                           ) : null}
                         </Pressable>
                       );
                     })}
                   </View>
-                ))
-              : null}
+                ))}
+              </View>
+            ) : null}
 
-            <SectionToggle
-              label="Method"
-              open={showMethod}
-              onToggle={() => setShowMethod((v) => !v)}
-              accessibilityLabel="Method section"
-              colors={colors}
-            />
-            {readMode || showMethod
-              ? [...recipe.steps]
-                  .sort((a, b) => a.order - b.order)
-                  .map((s, idx) => {
-                    const presets = extractStepTimerPresets(s.instruction);
-                    return (
-                      <View key={s.id} style={{ gap: space.sm }}>
-                        <View style={{ flexDirection: 'row', gap: space.md }}>
-                          <View
-                            style={{
-                              minWidth: 26,
-                              height: 26,
-                              borderRadius: radius.pill,
-                              backgroundColor: colors.primaryFill,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              marginTop: space.xxs,
-                            }}
-                          >
-                            <Text variant="captionStrong" tone="onAccent">
-                              {idx + 1}
-                            </Text>
-                          </View>
-                          <Text
-                            variant={readMode ? 'bodyStrong' : 'body'}
-                            style={[readMode ? READ_MODE_BODY : null, { flex: 1 }]}
-                          >
-                            {renderStepInstruction(s, recipe.baseServings, servings)}
+            {visibleSection === 'method' ? (
+              <View style={{ gap: space.xl }}>
+                {sortedSteps.map((s, idx) => {
+                  const presets = extractStepTimerPresets(s.instruction);
+                  return (
+                    <View key={s.id} style={{ gap: space.sm }}>
+                      <View style={{ flexDirection: 'row', gap: space.md }}>
+                        <View
+                          style={{
+                            width: STEP_BADGE,
+                            height: STEP_BADGE,
+                            borderRadius: radius.pill,
+                            backgroundColor: colors.primarySoft,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Text variant="captionStrong" tone="onAccentSoft">
+                            {idx + 1}
                           </Text>
                         </View>
-                        {presets.length > 0 ? (
-                          <View
-                            style={{
-                              flexDirection: 'row',
-                              gap: space.sm,
-                              flexWrap: 'wrap',
-                              marginLeft: 26 + space.md,
-                            }}
-                          >
-                            {presets.map((preset) => (
-                              <Chip
-                                key={preset.key}
-                                label={preset.label}
-                                icon="timer-outline"
-                                accessibilityLabel={`Start ${preset.label} timer for step ${idx + 1}`}
-                                accessibilityHint="Starts a countdown timer"
-                                onPress={() =>
-                                  void startStepTimer(
-                                    s.id,
-                                    `Step ${idx + 1} · ${preset.label}`,
-                                    preset.seconds
-                                  )
-                                }
-                              />
-                            ))}
-                          </View>
-                        ) : null}
+                        <Text
+                          variant={readMode ? 'bodyStrong' : 'body'}
+                          style={[readMode ? READ_MODE_BODY : null, { flex: 1 }]}
+                        >
+                          {renderStepInstruction(s, recipe.baseServings, servings)}
+                        </Text>
                       </View>
-                    );
-                  })
-              : null}
-
-            {!readMode ? (
-              <>
-                <SectionToggle
-                  label="Cook journal"
-                  open={showCookJournal}
-                  onToggle={() => setShowCookJournal((v) => !v)}
-                  accessibilityLabel="Cook journal section"
-                  colors={colors}
-                />
-                {showCookJournal && recipe.cookLogs.length > 0 ? (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ gap: space.md, paddingBottom: space.xs }}
-                  >
-                    {recipe.cookLogs.map((log) => {
-                      const cookedOn = new Date(log.cookedAt).toLocaleDateString();
-                      return (
-                        <View key={log.id} style={{ width: 132, gap: space.xs }}>
-                          <Pressable
-                            accessibilityRole={log.photoUri ? 'imagebutton' : 'button'}
-                            accessibilityLabel={
-                              log.photoUri
-                                ? `Cook photo from ${cookedOn}`
-                                : `Cook log from ${cookedOn}`
-                            }
-                            onPress={() =>
-                              log.photoUri
-                                ? setFullscreenImageUri(log.photoUri)
-                                : router.push(`/cook-log/${log.id}`)
-                            }
-                            style={({ pressed }) => pressedStyle(pressed, 0.85)}
-                          >
-                            {log.photoUri ? (
-                              <Image
-                                source={{ uri: log.photoUri }}
-                                style={{
-                                  width: 132,
-                                  height: 132,
-                                  borderRadius: radius.md,
-                                }}
-                                resizeMode="cover"
-                              />
-                            ) : (
-                              <View
-                                style={{
-                                  width: 132,
-                                  height: 132,
-                                  borderRadius: radius.md,
-                                  backgroundColor: colors.surfaceMuted,
-                                  borderWidth: 1,
-                                  borderColor: colors.border,
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                              >
-                                <Ionicons
-                                  name="document-text-outline"
-                                  size={26}
-                                  color={colors.textSecondary}
-                                />
-                              </View>
-                            )}
-                          </Pressable>
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Open cook log from ${cookedOn}`}
-                            onPress={() => router.push(`/cook-log/${log.id}`)}
-                            style={({ pressed }) => [{ gap: space.xxs }, pressedStyle(pressed)]}
-                          >
-                            <Text variant="caption" tone="secondary" numberOfLines={1}>
-                              {cookedOn}
-                              {typeof log.rating === 'number' ? ` · ${log.rating}/5` : ''}
-                            </Text>
-                            {log.notes ? (
-                              <Text variant="caption" numberOfLines={3}>
-                                {log.notes}
-                              </Text>
-                            ) : null}
-                          </Pressable>
-                          {log.photoUri ? (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel="Set this photo as the recipe hero image"
-                              onPress={async () => {
-                                await setRecipeMainImageFromCookLog(recipe.id, log.id);
-                                await reload();
-                              }}
-                              hitSlop={8}
-                              style={({ pressed }) => pressedStyle(pressed)}
-                            >
-                              <Text variant="caption" tone="accent">
-                                Set as hero
-                              </Text>
-                            </Pressable>
-                          ) : null}
+                      {presets.length > 0 ? (
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            gap: space.sm,
+                            flexWrap: 'wrap',
+                            marginLeft: STEP_BADGE + space.md,
+                          }}
+                        >
+                          {presets.map((preset) => (
+                            <Chip
+                              key={preset.key}
+                              label={preset.label}
+                              icon="timer-outline"
+                              accessibilityLabel={`Start ${preset.label} timer for step ${idx + 1}`}
+                              accessibilityHint="Starts a countdown timer"
+                              onPress={() =>
+                                startStepTimer(
+                                  s.id,
+                                  `Step ${idx + 1} · ${preset.label}`,
+                                  preset.seconds
+                                )
+                              }
+                            />
+                          ))}
                         </View>
-                      );
-                    })}
-                  </ScrollView>
-                ) : null}
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
 
-                <Card level={0} style={{ gap: space.md }}>
-                  <Text variant="overline" tone="secondary">
-                    Log a cook
-                  </Text>
+            {visibleSection === 'journal' ? (
+              <View style={{ gap: space.md }}>
+                <Card level={1} style={{ gap: space.md }}>
+                  <Text variant="subheading">Log a cook</Text>
 
                   <View
                     style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}
@@ -1176,7 +1141,7 @@ export default function RecipeDetailScreen() {
 
                   <Button
                     label="Log this cook"
-                    icon="add-circle-outline"
+                    icon="add"
                     fullWidth
                     size="lg"
                     loading={isLoggingCook}
@@ -1186,38 +1151,176 @@ export default function RecipeDetailScreen() {
                   />
                 </Card>
 
-                {pendingAdjustments.length > 0 ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Review ${pendingAdjustments.length} pending recipe updates`}
-                    onPress={() => router.push(`/recipe/adjustments/${pendingAdjustments[0].id}`)}
-                    android_ripple={ripple(colors.ripple)}
-                    style={({ pressed }) => [
-                      {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: space.md,
-                        borderWidth: 1,
-                        borderColor: colors.primary,
-                        borderRadius: radius.md,
-                        backgroundColor: colors.primarySoft,
-                        padding: space.lg,
-                        overflow: 'hidden',
-                      },
-                      pressedStyle(pressed),
-                    ]}
+                {recipe.cookLogs.length === 0 ? (
+                  <Text
+                    variant="body"
+                    tone="secondary"
+                    style={{ textAlign: 'center', paddingVertical: space.xl }}
                   >
-                    <Ionicons name="sparkles" size={18} color={colors.onPrimarySoft} />
-                    <Text variant="bodyStrong" tone="onAccentSoft" style={{ flex: 1 }}>
-                      Review pending updates ({pendingAdjustments.length})
-                    </Text>
-                    <Ionicons name="chevron-forward" size={16} color={colors.onPrimarySoft} />
-                  </Pressable>
+                    No cooks logged yet. Each one you log shows up here, with its notes and photo.
+                  </Text>
                 ) : null}
-              </>
+
+                {recipe.cookLogs.map((log) => {
+                  const cookedOn = new Date(log.cookedAt);
+                  const cookedLabel = cookedOn.toLocaleDateString();
+                  // The card itself is not pressable: sibling buttons stay
+                  // individually reachable for TalkBack, which a pressable
+                  // parent would swallow.
+                  return (
+                    <Card key={log.id} level={1} style={{ gap: space.sm }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open cook log from ${cookedLabel}`}
+                          onPress={() => router.push(`/cook-log/${log.id}`)}
+                          android_ripple={ripple(colors.ripple)}
+                          style={({ pressed }) => [
+                            {
+                              flex: 1,
+                              flexDirection: 'row',
+                              gap: space.lg,
+                              borderRadius: radius.md,
+                              overflow: 'hidden',
+                            },
+                            pressedStyle(pressed),
+                          ]}
+                        >
+                          <View style={{ width: control.md, alignItems: 'center' }}>
+                            <Text variant="numeral">{cookedOn.getDate()}</Text>
+                            <Text variant="caption" tone="secondary">
+                              {MONTHS[cookedOn.getMonth()]}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, gap: space.sm }}>
+                            <View
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: space.xxs,
+                                minHeight: control.sm,
+                              }}
+                            >
+                              {typeof log.rating === 'number' ? (
+                                <>
+                                  {[1, 2, 3, 4, 5].map((value) => (
+                                    <Ionicons
+                                      key={value}
+                                      name="star"
+                                      size={16}
+                                      color={
+                                        value <= (log.rating ?? 0)
+                                          ? colors.star
+                                          : colors.borderStrong
+                                      }
+                                    />
+                                  ))}
+                                  <Text
+                                    variant="caption"
+                                    tone="secondary"
+                                    style={{ marginLeft: space.xs }}
+                                  >
+                                    {log.rating} of 5
+                                  </Text>
+                                </>
+                              ) : (
+                                <Text variant="caption" tone="secondary">
+                                  No rating
+                                </Text>
+                              )}
+                            </View>
+                            {log.notes ? (
+                              <Text variant="body" numberOfLines={4}>
+                                {log.notes}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </Pressable>
+                        {log.photoUri ? (
+                          <Pressable
+                            accessibilityRole="imagebutton"
+                            accessibilityLabel={`Cook photo from ${cookedLabel}`}
+                            accessibilityHint="Opens the photo full screen"
+                            onPress={() => setFullscreenImageUri(log.photoUri ?? null)}
+                            android_ripple={ripple(colors.ripple)}
+                            style={({ pressed }) => [
+                              { borderRadius: radius.md, overflow: 'hidden' },
+                              pressedStyle(pressed, 0.85),
+                            ]}
+                          >
+                            <Image
+                              source={{ uri: log.photoUri }}
+                              style={{ width: control.lg, height: control.lg }}
+                              resizeMode="cover"
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      {log.photoUri ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Set this photo as the recipe hero image"
+                          onPress={async () => {
+                            await setRecipeMainImageFromCookLog(recipe.id, log.id);
+                            await reload();
+                          }}
+                          android_ripple={ripple(colors.ripple)}
+                          style={({ pressed }) => [
+                            {
+                              alignSelf: 'flex-start',
+                              justifyContent: 'center',
+                              minHeight: control.sm,
+                              marginLeft: control.md + space.lg,
+                              paddingHorizontal: space.xs,
+                              borderRadius: radius.sm,
+                              overflow: 'hidden',
+                            },
+                            pressedStyle(pressed),
+                          ]}
+                        >
+                          <Text variant="captionStrong" tone="accent">
+                            Use as recipe photo
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </Card>
+                  );
+                })}
+              </View>
             ) : null}
           </View>
         </ScrollView>
+
+        {canCook ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              paddingHorizontal: space.lg,
+              paddingTop: space.md,
+              paddingBottom: insets.bottom + space.md,
+              backgroundColor: colors.background,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            }}
+          >
+            <Button
+              label="Start cooking"
+              icon="timer-outline"
+              size="lg"
+              fullWidth
+              accessibilityHint="Opens step-by-step cooking mode"
+              onPress={() =>
+                router.push({
+                  pathname: '/recipe/cook/[id]',
+                  params: { id: recipe.id, servings: String(servings) },
+                })
+              }
+            />
+          </View>
+        ) : null}
 
         {aiEnabled ? (
           <>
@@ -1262,10 +1365,10 @@ export default function RecipeDetailScreen() {
                   right: space.xl,
                   // Clears the timer bar when one is running, so the two never
                   // stack on top of each other.
-                  bottom: insets.bottom + space.xl + (activeTimer ? 76 : 0),
-                  width: 56,
-                  height: 56,
-                  borderRadius: radius.pill,
+                  bottom: insets.bottom + dockHeight + space.lg + (activeTimer ? TIMER_BAR_CLEARANCE : 0),
+                  width: control.lg,
+                  height: control.lg,
+                  borderRadius: radius.lg,
                   backgroundColor: colors.primaryFill,
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1294,9 +1397,9 @@ export default function RecipeDetailScreen() {
               position: 'absolute',
               left: space.lg,
               right: space.lg,
-              bottom: insets.bottom + space.md,
-              borderRadius: radius.md,
-              borderWidth: 1,
+              bottom: insets.bottom + dockHeight + space.md,
+              borderRadius: radius.lg,
+              borderWidth: resolved === 'dark' ? 1 : 0,
               borderColor: colors.border,
               backgroundColor: colors.surface,
               paddingHorizontal: space.lg,
@@ -1321,34 +1424,14 @@ export default function RecipeDetailScreen() {
               accessibilityLabel={activeTimer.isPaused ? 'Resume timer' : 'Pause timer'}
               variant="accent"
               size={36}
-              onPress={() =>
-                setActiveTimer((current) => {
-                  if (!current) return current;
-                  if (current.isPaused) {
-                    return {
-                      ...current,
-                      isPaused: false,
-                      endsAtMs: Date.now() + current.remainingSeconds * 1000,
-                    };
-                  }
-                  const remainingSeconds = current.endsAtMs
-                    ? Math.max(0, Math.ceil((current.endsAtMs - Date.now()) / 1000))
-                    : current.remainingSeconds;
-                  return {
-                    ...current,
-                    remainingSeconds,
-                    isPaused: true,
-                    endsAtMs: null,
-                  };
-                })
-              }
+              onPress={toggleTimerPause}
             />
             <IconButton
               icon="stop"
               accessibilityLabel="Stop timer"
               variant="ghost"
               size={36}
-              onPress={() => setActiveTimer(null)}
+              onPress={stopTimer}
               style={{ backgroundColor: colors.destructiveSoft }}
             />
           </View>
@@ -1441,48 +1524,22 @@ export default function RecipeDetailScreen() {
   );
 }
 
-/** Collapsible group heading shared by the ingredients, method and journal blocks. */
-function SectionToggle({
-  label,
-  open,
-  onToggle,
-  accessibilityLabel,
-  colors,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-  accessibilityLabel: string;
-  colors: ReturnType<typeof useTheme>['colors'];
-}) {
+/** A read-only fact about the recipe, shaped like a chip but not pressable. */
+function MetaPill({ label }: { label: string }) {
+  const { colors } = useTheme();
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ expanded: open }}
-      onPress={onToggle}
-      style={({ pressed }) => [
-        {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: space.sm,
-          minHeight: 44,
-          marginTop: space.sm,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          paddingBottom: space.sm,
-        },
-        pressedStyle(pressed),
-      ]}
+    <View
+      style={{
+        minHeight: control.sm - space.xs,
+        justifyContent: 'center',
+        paddingHorizontal: space.md,
+        borderRadius: radius.pill,
+        backgroundColor: colors.surfaceMuted,
+      }}
     >
-      <Text variant="heading" style={{ flex: 1 }}>
+      <Text variant="caption" tone="secondary">
         {label}
       </Text>
-      <Ionicons
-        name={open ? 'chevron-up' : 'chevron-down'}
-        size={18}
-        color={colors.textSecondary}
-      />
-    </Pressable>
+    </View>
   );
 }

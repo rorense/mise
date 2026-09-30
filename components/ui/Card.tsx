@@ -37,7 +37,9 @@ export function Card({
   const base: ViewStyle = {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    borderWidth: 1,
+    // Light mode separates cards with a soft shadow alone; dark mode cannot
+    // render one, so it keeps the hairline.
+    borderWidth: resolved === 'dark' || level === 0 ? 1 : 0,
     borderColor: colors.border,
     padding: padded ? space.lg : 0,
     overflow: 'hidden',

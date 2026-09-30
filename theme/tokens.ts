@@ -32,12 +32,12 @@ export const radius = {
   /** 4 — the squared-off corner on a chat bubble, and little else. */
   xs: 4,
   sm: 8,
-  /** 12 — inputs, small buttons */
-  md: 12,
-  /** 16 — cards, sheets, dialogs */
-  lg: 16,
-  /** 20 — large media cards */
-  xl: 20,
+  /** 14 — multiline inputs, list rows */
+  md: 14,
+  /** 20 — cards, photo tiles, dialogs */
+  lg: 20,
+  /** 28 — sheets and the recipe body laid over its photo */
+  xl: 28,
   /** Fully rounded. Not `9999`: very large radii can overflow on some Android GPUs. */
   pill: 999,
 } as const;
@@ -45,13 +45,16 @@ export const radius = {
 /**
  * Loaded in `app/_layout.tsx`. Referencing the families through here means a
  * typo is a compile error rather than a silent fallback to the system font.
+ *
+ * One grotesk for everything: weight and size carry the hierarchy. The light
+ * cut is only for large numerals (servings, timers, journal dates).
  */
 export const fontFamily = {
-  serif: 'Lora_400Regular',
-  serifBold: 'Lora_700Bold',
-  sans: 'DMSans_400Regular',
-  sansMedium: 'DMSans_500Medium',
-  sansBold: 'DMSans_700Bold',
+  light: 'Archivo_300Light',
+  sans: 'Archivo_400Regular',
+  sansMedium: 'Archivo_500Medium',
+  sansSemiBold: 'Archivo_600SemiBold',
+  sansBold: 'Archivo_700Bold',
 } as const;
 
 export type TextVariant =
@@ -65,7 +68,8 @@ export type TextVariant =
   | 'caption'
   | 'captionStrong'
   | 'overline'
-  | 'button';
+  | 'button'
+  | 'numeral';
 
 /**
  * Colourless type scale — `Text` in `components/ui` pairs these with a tone.
@@ -74,27 +78,34 @@ export type TextVariant =
  */
 export const typeScale: Record<TextVariant, TextStyle> = {
   /** Library home only. */
-  display: { fontFamily: fontFamily.serifBold, fontSize: 30, lineHeight: 38 },
+  display: { fontFamily: fontFamily.sansSemiBold, fontSize: 34, lineHeight: 40, letterSpacing: -1.3 },
   /** Screen titles. */
-  title: { fontFamily: fontFamily.serifBold, fontSize: 22, lineHeight: 29 },
+  title: { fontFamily: fontFamily.sansSemiBold, fontSize: 28, lineHeight: 32, letterSpacing: -0.9 },
   /** Section and dialog headings. */
-  heading: { fontFamily: fontFamily.serifBold, fontSize: 19, lineHeight: 25 },
+  heading: { fontFamily: fontFamily.sansSemiBold, fontSize: 20, lineHeight: 26, letterSpacing: -0.4 },
   /** Card titles, list-row titles. */
-  subheading: { fontFamily: fontFamily.serifBold, fontSize: 16, lineHeight: 22 },
-  body: { fontFamily: fontFamily.sans, fontSize: 15, lineHeight: 22 },
-  bodyStrong: { fontFamily: fontFamily.sansBold, fontSize: 15, lineHeight: 22 },
+  subheading: { fontFamily: fontFamily.sansSemiBold, fontSize: 16, lineHeight: 21, letterSpacing: -0.2 },
+  body: { fontFamily: fontFamily.sans, fontSize: 16, lineHeight: 23 },
+  bodyStrong: { fontFamily: fontFamily.sansSemiBold, fontSize: 16, lineHeight: 23 },
   /** Field labels and other short UI strings. */
   label: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 20 },
   caption: { fontFamily: fontFamily.sans, fontSize: 13, lineHeight: 18 },
   captionStrong: { fontFamily: fontFamily.sansMedium, fontSize: 13, lineHeight: 18 },
+  /** Small group label above a block. Sentence case: shouting caps read dated. */
   overline: {
     fontFamily: fontFamily.sansMedium,
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  button: { fontFamily: fontFamily.sansBold, fontSize: 15, lineHeight: 20 },
+  button: { fontFamily: fontFamily.sansSemiBold, fontSize: 15, lineHeight: 20 },
+  /** Big read-at-a-glance figures: servings, timers, journal dates. */
+  numeral: {
+    fontFamily: fontFamily.light,
+    fontSize: 40,
+    lineHeight: 44,
+    letterSpacing: -1.2,
+    fontVariant: ['tabular-nums'],
+  },
 };
 
 /** Material's minimum touch target. Controls smaller than this need `hitSlop`. */
@@ -102,10 +113,12 @@ export const MIN_TOUCH = 48;
 
 export const control = {
   /** Icon buttons and small pills. */
-  sm: 36,
+  sm: 40,
   /** Default control height — inputs, buttons. */
-  md: 44,
-  lg: 52,
+  md: 48,
+  lg: 56,
+  /** Cooking-mode buttons: hit with a knuckle from arm's length. */
+  xl: 64,
 } as const;
 
 export const duration = {

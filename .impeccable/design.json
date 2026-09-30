@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-01T00:00:00Z",
+  "title": "Design System: Mise en",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Clay", "canonical": "#B05426", "tonalRamp": ["#3F1E0E", "#6D3418", "#9B4A22", "#C9602B", "#DA8053", "#E4A281", "#F0CAB8", "#FAF0EA"] },
+      "primary-soft": { "role": "primary", "displayName": "Clay Tint", "canonical": "#F6E6DA", "tonalRamp": ["#3E230F", "#6B3D1A", "#985625", "#C57030", "#D68D57", "#E1AC84", "#EED0B9", "#FAF1EA"] },
+      "on-primary-soft": { "role": "primary", "displayName": "Deep Clay", "canonical": "#8F4419" },
+      "dark-primary": { "role": "primary", "displayName": "Ember", "canonical": "#E59254" },
+      "background": { "role": "neutral", "displayName": "Cream", "canonical": "#FAF8F5", "tonalRamp": ["#33291A", "#58472C", "#7E653F", "#A38352", "#B99D74", "#CCB899", "#E2D7C5", "#F6F3EE"] },
+      "surface": { "role": "neutral", "displayName": "White", "canonical": "#FFFFFF" },
+      "surface-muted": { "role": "neutral", "displayName": "Oat", "canonical": "#F1ECE5", "tonalRamp": ["#32281B", "#56462E", "#7B6342", "#9F8156", "#B69C77", "#C9B69C", "#E1D6C7", "#F6F3EE"] },
+      "border": { "role": "neutral", "displayName": "Linen Line", "canonical": "#E6E1D9" },
+      "border-strong": { "role": "neutral", "displayName": "Stone Line", "canonical": "#D5CEC3" },
+      "text-primary": { "role": "neutral", "displayName": "Ink", "canonical": "#1A1A1A", "tonalRamp": ["#262626", "#424242", "#5E5E5E", "#7A7A7A", "#969696", "#B3B3B3", "#D4D4D4", "#F2F2F2"] },
+      "text-secondary": { "role": "neutral", "displayName": "Graphite", "canonical": "#6B6B6B" },
+      "destructive": { "role": "semantic", "displayName": "Signal Red", "canonical": "#D93025", "tonalRamp": ["#410E0B", "#711913", "#A1241B", "#D12E24", "#E1554C", "#E9837C", "#F2B9B5", "#FBEAE9"] },
+      "star": { "role": "semantic", "displayName": "Honey", "canonical": "#F2B138", "tonalRamp": ["#483005", "#7C5408", "#B1770C", "#E69B0F", "#F2B23B", "#F6C76F", "#FADFAE", "#FDF6E7"] },
+      "flame": { "role": "semantic", "displayName": "Flame", "canonical": "#FF9F1C", "tonalRamp": ["#4D2C00", "#854D00", "#BD6D00", "#F58D00", "#FFA72E", "#FFBE66", "#FFDAA8", "#FFF4E5"] },
+      "dark-background": { "role": "neutral", "displayName": "Night Bench", "canonical": "#121211" },
+      "dark-surface": { "role": "neutral", "displayName": "Charcoal", "canonical": "#1E1E1C" },
+      "dark-surface-muted": { "role": "neutral", "displayName": "Soot", "canonical": "#2A2A26" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The 'Mise en' title on the library home only." },
+      "title": { "displayName": "Title", "purpose": "Screen titles, the recipe title, the current instruction in cooking mode." },
+      "heading": { "displayName": "Heading", "purpose": "Section and dialog headings; the lead card title over its photo." },
+      "subheading": { "displayName": "Subheading", "purpose": "Photo-tile, card and list-row titles." },
+      "body": { "displayName": "Body", "purpose": "Recipe text, ingredients, steps." },
+      "body-strong": { "displayName": "Body Strong", "purpose": "Ingredient quantities, emphasised lines." },
+      "label": { "displayName": "Label", "purpose": "Field labels and segmented-control options." },
+      "button": { "displayName": "Button", "purpose": "Button and FAB labels." },
+      "caption": { "displayName": "Caption", "purpose": "Counts, sort line, meta under tiles." },
+      "caption-strong": { "displayName": "Caption Strong", "purpose": "Chip labels, step badges, small pills." },
+      "overline": { "displayName": "Overline", "purpose": "Sentence-case group label above a block of content, e.g. an ingredient group." },
+      "numeral": { "displayName": "Numeral", "purpose": "Light tabular figures for servings, timers and journal dates." }
+    },
+    "shadows": [
+      { "name": "elevation-1", "value": "0 1px 3px rgba(0,0,0,0.06)", "purpose": "Light mode only (Android elevation 1). Resting cards, the selected segment, the servings bar. Dark mode uses a 1px border instead." },
+      { "name": "elevation-2", "value": "0 2px 8px rgba(0,0,0,0.09)", "purpose": "Light mode only (Android elevation 3). Available for cards; unused on the shipped screens." },
+      { "name": "elevation-3", "value": "0 4px 16px rgba(0,0,0,0.14)", "purpose": "Light mode only (Android elevation 6). FABs, the active-timer bar, dialogs." }
+    ],
+    "motion": [
+      { "name": "duration-fast", "value": "120ms", "purpose": "Fast state changes." },
+      { "name": "duration-base", "value": "200ms", "purpose": "Default transition." },
+      { "name": "duration-slow", "value": "320ms", "purpose": "Larger movements." }
+    ],
+    "breakpoints": [],
+    "controlSizes": [
+      { "name": "sm", "value": "40px", "purpose": "Icon buttons, segment options." },
+      { "name": "md", "value": "48px", "purpose": "Default control height and minimum touch target." },
+      { "name": "lg", "value": "56px", "purpose": "Large buttons, FABs." },
+      { "name": "xl", "value": "64px", "purpose": "Cooking-mode buttons, pressed with a knuckle from arm's length." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Clay pill with on-fill text; the main action on a screen.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\"><path d=\"M5 12l5 5 9-10\"/></svg>Review</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:12px 16px; border:0; border-radius:999px; font-family:Archivo, sans-serif; font-size:15px; line-height:20px; font-weight:600; cursor:pointer; transition:filter 120ms; } .ds-btn-primary { background:#B05426; color:#FFFFFF; } .ds-btn-primary:hover { filter:brightness(0.94); } .ds-btn-primary:active { filter:brightness(0.88); } .ds-btn:focus-visible { outline:2px solid #B05426; outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Oat pill with ink text; the companion action.",
+      "html": "<button class=\"ds-btn2\">Ignore</button>",
+      "css": ".ds-btn2 { display:inline-flex; align-items:center; justify-content:center; min-height:48px; padding:12px 16px; border:0; border-radius:999px; background:#F1ECE5; color:#1A1A1A; font-family:Archivo, sans-serif; font-size:15px; line-height:20px; font-weight:600; cursor:pointer; } .ds-btn2:hover { background:#E9E2D8; } .ds-btn2:active { background:#E1D8CC; } .ds-btn2:focus-visible { outline:2px solid #B05426; outline-offset:2px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "Oat pill field; the outline appears only on focus or error.",
+      "html": "<label class=\"ds-field\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"M20 20l-4-4\"/></svg><input placeholder=\"Search  has:chicken  mins<30\"></label>",
+      "css": ".ds-field { display:flex; align-items:center; gap:8px; padding:0 16px; background:#F1ECE5; border:1px solid transparent; border-radius:999px; color:#6B6B6B; } .ds-field input { flex:1; border:0; background:transparent; padding:12px 0; font-family:Archivo, sans-serif; font-size:16px; line-height:23px; color:#1A1A1A; outline:none; } .ds-field input::placeholder { color:#6B6B6B; } .ds-field:focus-within { border-color:#B05426; color:#B05426; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "nav",
+      "refersTo": "segmented-track",
+      "description": "One-of-N switch: oat track, selected option raised onto a white pill.",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\"><button class=\"ds-seg-opt is-on\">All</button><button class=\"ds-seg-opt\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"#B05426\"><path d=\"M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-3 2-4 2-7 2 1 3 3 3 5 1-2 1-5 0-9z\"/></svg>Want to cook</button><button class=\"ds-seg-opt\">Favourites</button></div>",
+      "css": ".ds-seg { display:flex; gap:4px; padding:4px; background:#F1ECE5; border-radius:999px; } .ds-seg-opt { flex:1; display:flex; align-items:center; justify-content:center; gap:4px; min-height:40px; padding:0 12px; border:0; border-radius:999px; background:transparent; color:#6B6B6B; font-family:Archivo, sans-serif; font-size:14px; line-height:20px; font-weight:500; cursor:pointer; } .ds-seg-opt:hover { color:#1A1A1A; } .ds-seg-opt.is-on { background:#FFFFFF; color:#1A1A1A; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.06); } .ds-seg-opt:focus-visible { outline:2px solid #B05426; outline-offset:1px; }"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Tonal pill for tags, filters and timer presets; active turns clay tint.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\">Italian</button><button class=\"ds-chip is-on\">Weeknight</button></div>",
+      "css": ".ds-chips { display:flex; gap:8px; } .ds-chip { display:inline-flex; align-items:center; gap:4px; min-height:36px; padding:8px 12px; border:0; border-radius:999px; background:#F1ECE5; color:#1A1A1A; font-family:Archivo, sans-serif; font-size:13px; line-height:18px; font-weight:500; cursor:pointer; } .ds-chip:hover { background:#E9E2D8; } .ds-chip.is-on { background:#F6E6DA; color:#8F4419; } .ds-chip:focus-visible { outline:2px solid #B05426; outline-offset:2px; }"
+    },
+    {
+      "name": "Photo Tile",
+      "kind": "card",
+      "refersTo": "photo-tile",
+      "description": "Square photo with 20 corners; title and meta sit below it, never on it.",
+      "html": "<a class=\"ds-tile\" href=\"#\"><div class=\"ds-tile-img\"></div><div class=\"ds-tile-title\">Braised lamb shoulder</div><div class=\"ds-tile-meta\">Greek · Cooked 3×</div></a>",
+      "css": ".ds-tile { display:block; width:170px; text-decoration:none; } .ds-tile-img { aspect-ratio:1; border-radius:20px; background:#F1ECE5 linear-gradient(135deg,#C9A27E,#8C5A3A); } .ds-tile:hover .ds-tile-img { opacity:0.85; } .ds-tile:focus-visible { outline:2px solid #B05426; outline-offset:2px; border-radius:20px; } .ds-tile-title { padding:8px 2px 0; font-family:Archivo, sans-serif; font-size:16px; line-height:21px; font-weight:600; letter-spacing:-0.2px; color:#1A1A1A; } .ds-tile-meta { padding:2px 2px 0; font-family:Archivo, sans-serif; font-size:13px; line-height:18px; color:#6B6B6B; }"
+    },
+    {
+      "name": "Servings Bar",
+      "kind": "custom",
+      "refersTo": "servings-bar",
+      "description": "White pill with steppers and the count in the light tabular numeral.",
+      "html": "<div class=\"ds-serves\"><span class=\"ds-serves-l\">Serves</span><button class=\"ds-step\" aria-label=\"Fewer servings\">&minus;</button><span class=\"ds-num\">4</span><button class=\"ds-step\" aria-label=\"More servings\">+</button></div>",
+      "css": ".ds-serves { display:flex; align-items:center; gap:8px; padding:8px 8px 8px 20px; background:#FFFFFF; border-radius:999px; box-shadow:0 1px 3px rgba(0,0,0,0.06); max-width:340px; } .ds-serves-l { flex:1; font-family:Archivo, sans-serif; font-size:16px; line-height:23px; color:#6B6B6B; } .ds-step { width:48px; height:48px; border:0; border-radius:999px; background:#F1ECE5; color:#1A1A1A; font-size:24px; cursor:pointer; } .ds-step:hover { background:#E9E2D8; } .ds-step:focus-visible { outline:2px solid #B05426; outline-offset:2px; } .ds-num { min-width:56px; text-align:center; font-family:Archivo, sans-serif; font-weight:300; font-size:40px; line-height:44px; letter-spacing:-1.2px; font-variant-numeric:tabular-nums; color:#1A1A1A; }"
+    },
+    {
+      "name": "Extended FAB",
+      "kind": "button",
+      "refersTo": "fab-extended",
+      "description": "Clay slab with 20 corners at level 3; the Add recipe action.",
+      "html": "<button class=\"ds-fab\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg>Add recipe</button>",
+      "css": ".ds-fab { display:inline-flex; align-items:center; gap:8px; height:56px; padding:0 20px 0 16px; border:0; border-radius:20px; background:#B05426; color:#FFFFFF; font-family:Archivo, sans-serif; font-size:15px; line-height:20px; font-weight:600; box-shadow:0 4px 16px rgba(0,0,0,0.14); cursor:pointer; } .ds-fab:hover { filter:brightness(0.94); } .ds-fab:active { filter:brightness(0.88); } .ds-fab:focus-visible { outline:2px solid #1A1A1A; outline-offset:2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Bench Appliance",
+    "overview": "Mise en is a kitchen tool that knows it will be used with wet hands at arm's length. The system is built so a screen has few controls, each one obvious: pill-shaped, tonal and big enough to hit with a knuckle. The user's own food photos carry the colour and the mood; the chrome around them stays quiet cream, white and warm grey with a single clay accent.\n\nHierarchy comes from one grotesk, Archivo, used at different weights and sizes, never from a second face or decorative labels. Large figures (servings, timers, the day of a cook) are set in a light, tabular numeral so they read like the display on a good appliance. Surfaces are flat and tonal: sunken fields and tracks in `surface-muted`, raised cards in white with a soft shadow in light mode, and hairline borders in dark mode, where a shadow cannot render.\n\nLight and dark are both first-class. Every foreground/background pair is chosen to clear WCAG AA in both modes, which is why filled controls use dedicated `on-*` text colours rather than white.",
+    "keyCharacteristics": [
+      "Photos lead; titles sit below tiles, or on a graded scrim when they must sit on the photo.",
+      "One accent (clay), used for primary actions, active states and progress.",
+      "Pills everywhere a finger lands; 20/28 radii for containers and sheets.",
+      "Flat tonal layering; shadow only in light mode and only at three levels.",
+      "48dp minimum targets, 64dp in cooking mode."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Clay is the only hue in the chrome. Star and flame are markers, not accents; they never fill a control or a surface.", "section": "colors" },
+      { "name": "The On-Token Rule", "body": "Text on any fill uses its paired `on-*` token (`on-primary-fill`, `on-primary-soft`, `dark-on-destructive-fill`), never a literal white. White on the dark-mode accent is 3.2:1 and fails.", "section": "colors" },
+      { "name": "The Theme-Only Hex Rule", "body": "Colour values live in `theme/colors.ts` and nowhere else; screens reference tokens.", "section": "colors" },
+      { "name": "The One Grotesk Rule", "body": "Archivo is the only face. Hierarchy comes from weight and size; do not add a serif, a mono or a system display face.", "section": "typography" },
+      { "name": "The Light Numeral Rule", "body": "A number that the cook reads at a glance is set in `numeral`: light weight, tabular figures, so it does not jitter as it counts down. Nothing that is not a number uses this style.", "section": "typography" },
+      { "name": "The Role-Not-Size Rule", "body": "Text is set through the `Text` component by role (`variant` + `tone`). No raw `fontSize` or `fontFamily` outside `theme/`.", "section": "typography" },
+      { "name": "The Spacing-Scale Rule", "body": "Padding, margin and gap always come from the `space` scale. Component dimensions (photo heights, ring size) may be fixed numbers; spacing may not.", "section": "layout" },
+      { "name": "The Elevation-Helper Rule", "body": "Depth is set only through `elevation(level, mode)`. Never set `shadowOpacity` or `shadowRadius` directly: Android ignores them and dark mode must not fake depth.", "section": "elevation" },
+      { "name": "The Dark Hairline Rule", "body": "Anything raised in light mode gets a 1px `border` in dark mode instead of a shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** build screens from `components/ui` (`Screen`, `Button`, `IconButton`, `Card`, `Chip`, `TextField`, `SegmentedControl`, `SwitchRow`, `Text`, `ModalCard`, `Section`, `ImageScrim`) rather than hand-rolling a `Pressable` one of them covers.",
+      "**Do** give every `Pressable` `android_ripple={ripple(...)}` plus `pressedStyle(pressed)`.",
+      "**Do** keep every target at least 48dp, using `hitSlopFor(size)` when the control must look smaller; use 64dp (`control.xl`) for anything pressed mid-cook.",
+      "**Do** give every interactive element an `accessibilityLabel` and `accessibilityRole`, and stateful ones `accessibilityState`.",
+      "**Do** mark want-to-cook with the flame icon and favourites with the honey star colour.",
+      "**Do** lay `ImageScrim` under any text placed on a photo.",
+      "**Do** make a circle with a radius of half a known size; that is the only allowed raw radius."
+    ],
+    "donts": [
+      "**Don't** use raw numbers for padding, margin, gap, `borderRadius` or `fontSize`, or hex literals outside `theme/`.",
+      "**Don't** set `shadowOpacity` or `shadowRadius` directly; use `elevation(level, mode)`.",
+      "**Don't** put white text on a filled control; use the matching `on-*` token.",
+      "**Don't** set overlines or labels in uppercase; the overline is sentence case.",
+      "**Don't** bring back rows of filter chips or collapsible sections as primary navigation; use one segmented switch plus a more-filters button.",
+      "**Don't** put tile titles on the photo; only the lead card does that, over a scrim."
+    ]
+  }
+}

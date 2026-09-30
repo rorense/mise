@@ -36,7 +36,7 @@ export function IconButton({
   const { colors } = useTheme();
 
   const tone: Record<IconButtonVariant, { bg: string; fg: string; border: string }> = {
-    surface: { bg: colors.surface, fg: colors.textPrimary, border: colors.border },
+    surface: { bg: colors.surfaceMuted, fg: colors.textPrimary, border: 'transparent' },
     ghost: { bg: 'transparent', fg: colors.textPrimary, border: 'transparent' },
     accent: { bg: colors.primarySoft, fg: colors.onPrimarySoft, border: 'transparent' },
     onImage: { bg: colors.imageChrome, fg: colors.onImage, border: 'transparent' },

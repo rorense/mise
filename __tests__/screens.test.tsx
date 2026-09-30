@@ -139,8 +139,8 @@ describe('library screen', () => {
 
     expect(body).toContain('Mise en');
     expect(body).toContain('Roast Chicken');
-    expect(body).toContain('Favorites');
-    expect(body).toContain('3 cooks');
+    expect(body).toContain('Favourites');
+    expect(body).toContain('Cooked 3×');
   });
 
   it('describes each card as one phrase for a screen reader', async () => {

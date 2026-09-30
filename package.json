@@ -11,8 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@expo-google-fonts/dm-sans": "^0.4.2",
-    "@expo-google-fonts/lora": "^0.4.2",
+    "@expo-google-fonts/archivo": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "^5.1.2",
     "@react-native-community/netinfo": "11.4.1",

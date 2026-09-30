@@ -54,9 +54,9 @@ export function Button({
       ripple: colors.rippleOnFill,
     },
     secondary: {
-      bg: colors.surface,
+      bg: colors.surfaceMuted,
       fg: colors.textPrimary,
-      border: colors.border,
+      border: 'transparent',
       ripple: colors.ripple,
     },
     ghost: {
@@ -92,7 +92,7 @@ export function Button({
           gap: space.sm,
           paddingHorizontal: size === 'lg' ? space.xl : space.lg,
           paddingVertical: space.md,
-          borderRadius: radius.md,
+          borderRadius: radius.pill,
           backgroundColor: tone.bg,
           borderWidth: tone.border === 'transparent' ? 0 : 1,
           borderColor: tone.border,

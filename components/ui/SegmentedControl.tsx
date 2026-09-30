@@ -1,5 +1,5 @@
 import { useTheme } from '@/theme/ThemeContext';
-import { radius, space } from '@/theme/tokens';
+import { control, elevation, fontFamily, radius, space } from '@/theme/tokens';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
 import { pressedStyle, ripple } from './press';
@@ -23,9 +23,9 @@ export type SegmentedControlProps<T extends string> = {
 };
 
 /**
- * A one-of-N switch. Selection reads the same here as it does on `Chip` —
- * tinted fill plus an accent outline — so "this one is active" only has to be
- * learned once.
+ * A one-of-N switch: a sunken track with the chosen option raised onto a
+ * surface-coloured pill. An option's icon keeps the accent colour in both
+ * states, so a marker like the want-to-cook flame reads the same everywhere.
  */
 export function SegmentedControl<T extends string>({
   value,
@@ -34,7 +34,7 @@ export function SegmentedControl<T extends string>({
   accessibilityLabel,
   style,
 }: SegmentedControlProps<T>) {
-  const { colors } = useTheme();
+  const { colors, resolved } = useTheme();
 
   return (
     <View
@@ -68,28 +68,24 @@ export function SegmentedControl<T extends string>({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: space.xs,
-                minHeight: 40,
+                minHeight: control.sm,
                 paddingHorizontal: space.md,
                 borderRadius: radius.pill,
-                backgroundColor: selected ? colors.primarySoft : 'transparent',
-                borderWidth: 1,
-                borderColor: selected ? colors.primary : 'transparent',
+                backgroundColor: selected ? colors.surface : 'transparent',
                 overflow: 'hidden',
+                ...(selected ? elevation(1, resolved) : null),
               },
               pressedStyle(pressed),
             ]}
           >
             {option.icon ? (
-              <Ionicons
-                name={option.icon}
-                size={15}
-                color={selected ? colors.onPrimarySoft : colors.textSecondary}
-              />
+              <Ionicons name={option.icon} size={15} color={colors.primary} />
             ) : null}
             <Text
               variant="label"
-              tone={selected ? 'onAccentSoft' : 'secondary'}
+              tone={selected ? 'primary' : 'secondary'}
               numberOfLines={1}
+              style={selected ? { fontFamily: fontFamily.sansSemiBold } : undefined}
             >
               {option.label}
             </Text>

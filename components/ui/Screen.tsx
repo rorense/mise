@@ -117,7 +117,7 @@ export function Screen({
         >
           {header.back ? (
             <IconButton
-              icon="chevron-back"
+              icon="arrow-back"
               accessibilityLabel="Go back"
               onPress={goBack}
               variant="surface"

@@ -41,7 +41,9 @@ export function TextField({
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
 
-  const outline = error ? colors.destructive : focused ? colors.primary : colors.border;
+  // Idle fields are a tonal fill with an invisible outline; the outline only
+  // appears to say "focused" or "wrong".
+  const outline = error ? colors.destructive : focused ? colors.primary : 'transparent';
 
   return (
     <View style={containerStyle}>
@@ -55,13 +57,13 @@ export function TextField({
           flexDirection: 'row',
           alignItems: multiline ? 'flex-start' : 'center',
           gap: space.sm,
-          backgroundColor: colors.surface,
-          borderRadius: radius.md,
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: multiline ? radius.md : radius.pill,
           borderWidth: 1,
           // The focus ring is a colour change, not a width change: growing the
           // border would shift the text by a pixel on every focus.
           borderColor: outline,
-          paddingHorizontal: space.md,
+          paddingHorizontal: multiline ? space.md : space.lg,
         }}
       >
         {icon ? (

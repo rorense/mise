@@ -1,5 +1,5 @@
 import { useTheme } from '@/theme/ThemeContext';
-import { radius, space, typeScale } from '@/theme/tokens';
+import { control, radius, space, typeScale } from '@/theme/tokens';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, type StyleProp, type ViewStyle } from 'react-native';
 import { pressedStyle, ripple } from './press';
@@ -15,9 +15,9 @@ export type ChipProps = {
 };
 
 /**
- * Selectable pill. The active state uses the solid `primarySoft` token rather
- * than the old `colors.primary + '22'` trick, which rendered as a near-invisible
- * smudge in dark mode because the same alpha cannot work over both backgrounds.
+ * Selectable pill: a tonal fill with no outline. Active swaps to the solid
+ * `primarySoft` token rather than the old `colors.primary + '22'` trick, which
+ * rendered as a near-invisible smudge in dark mode.
  */
 export function Chip({
   label,
@@ -47,13 +47,11 @@ export function Chip({
           flexDirection: 'row',
           alignItems: 'center',
           gap: space.xs,
-          minHeight: 34,
+          minHeight: control.sm - space.xs,
           paddingHorizontal: space.md,
           paddingVertical: space.sm,
           borderRadius: radius.pill,
-          backgroundColor: active ? colors.primarySoft : colors.surface,
-          borderWidth: 1,
-          borderColor: active ? colors.primary : colors.border,
+          backgroundColor: active ? colors.primarySoft : colors.surfaceMuted,
           alignSelf: 'flex-start',
           justifyContent: 'center',
           overflow: 'hidden',
