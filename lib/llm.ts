@@ -1,3 +1,4 @@
+import { claudeCompletion } from '@/lib/anthropic';
 import { geminiCompletion } from '@/lib/gemini';
 import { chatCompletion } from '@/lib/openai';
 import type { AiProvider } from '@/lib/secrets';
@@ -25,6 +26,9 @@ export async function llmCompletion(
 ): Promise<string> {
   if (provider === 'gemini') {
     return geminiCompletion(apiKey, messages, options);
+  }
+  if (provider === 'anthropic') {
+    return claudeCompletion(apiKey, messages, options);
   }
   return chatCompletion(apiKey, messages, options);
 }

@@ -31,6 +31,7 @@ import {
   setAiProvider,
   type AiProvider,
 } from '@/lib/secrets';
+import { AI_PROVIDER_LABEL } from '@/lib/aiConfig';
 import type { AppearanceMode } from '@/theme/colors';
 import { useTheme } from '@/theme/ThemeContext';
 import { space } from '@/theme/tokens';
@@ -40,11 +41,6 @@ import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
 import { Switch, View } from 'react-native';
-
-const PROVIDER_LABEL: Record<AiProvider, string> = {
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-};
 
 export default function SettingsScreen() {
   const { colors, mode, setMode } = useTheme();
@@ -173,7 +169,7 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  const providerName = PROVIDER_LABEL[aiProvider];
+  const providerName = AI_PROVIDER_LABEL[aiProvider];
 
   return (
     <Screen scroll header={{ title: 'Settings', back: true }} gap={space.xxl}>
@@ -217,8 +213,9 @@ export default function SettingsScreen() {
               value={aiProvider}
               accessibilityLabel="AI provider"
               options={[
-                { value: 'openai', label: 'OpenAI' },
-                { value: 'gemini', label: 'Gemini' },
+                { value: 'openai', label: AI_PROVIDER_LABEL.openai },
+                { value: 'gemini', label: AI_PROVIDER_LABEL.gemini },
+                { value: 'anthropic', label: AI_PROVIDER_LABEL.anthropic },
               ]}
               onChange={async (provider) => {
                 setAiProviderState(provider);

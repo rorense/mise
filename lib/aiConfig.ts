@@ -7,6 +7,13 @@ import {
 
 export type AiUnavailableReason = 'disabled' | 'missing-key';
 
+/** How each provider is named in Settings and in error messages. */
+export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  anthropic: 'Claude',
+};
+
 export type AiCredentials =
   | { ok: true; provider: AiProvider; apiKey: string }
   | { ok: false; reason: AiUnavailableReason; provider: AiProvider };
@@ -40,8 +47,6 @@ export function describeAiUnavailable(
   }
   return {
     title: 'No API key',
-    message: `Add your ${
-      provider === 'gemini' ? 'Gemini' : 'OpenAI'
-    } API key in Settings to use this.`,
+    message: `Add your ${AI_PROVIDER_LABEL[provider]} API key in Settings to use this.`,
   };
 }

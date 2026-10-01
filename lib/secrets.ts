@@ -1,6 +1,6 @@
 import type { AppearanceMode } from '@/theme/colors';
 import * as SecureStore from 'expo-secure-store';
-export type AiProvider = 'openai' | 'gemini';
+export type AiProvider = 'openai' | 'gemini' | 'anthropic';
 
 /**
  * API keys live here — in Android's Keystore-backed SecureStore — and never in
@@ -10,6 +10,7 @@ export type AiProvider = 'openai' | 'gemini';
 const KEY_AI_API: Record<AiProvider, string> = {
   openai: 'mise_openai_api_key',
   gemini: 'mise_gemini_api_key',
+  anthropic: 'mise_anthropic_api_key',
 };
 
 const KEY_APPEARANCE = 'mise_appearance';
@@ -84,7 +85,7 @@ export async function setSeenStepDragHint(seen: boolean): Promise<void> {
 
 export async function getAiProvider(): Promise<AiProvider> {
   const value = await SecureStore.getItemAsync(KEY_AI_PROVIDER);
-  return value === 'gemini' ? 'gemini' : 'openai';
+  return value === 'gemini' || value === 'anthropic' ? value : 'openai';
 }
 
 export async function setAiProvider(provider: AiProvider): Promise<void> {
